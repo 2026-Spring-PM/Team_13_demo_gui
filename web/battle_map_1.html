@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Battle Map 1</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:system-ui,sans-serif}
+    #battle-scene{position:fixed;inset:0;overflow:hidden}
+    #battle-background{position:absolute;left:var(--map-left);top:var(--map-top);width:var(--map-size);height:var(--map-size);display:block;object-fit:contain}
+    #object-layer{position:fixed;inset:0}
+    .map-selectable{position:absolute;border:0;background:transparent;cursor:pointer;transform:translate(-50%,-50%) scale(1);transition:transform .18s ease;display:grid;place-items:center;touch-action:manipulation}
+    .map-selectable.is-hovered{transform:translate(-50%,-50%) scale(1.14)}
+    .map-selectable.is-locked{cursor:not-allowed}
+    .map-selectable.is-locked img{filter:grayscale(1) brightness(.58) drop-shadow(0 4px 7px rgba(0,0,0,.45));opacity:.72}
+    .map-selectable.is-locked .stage-label{background:rgba(64,64,64,.78);color:#d1d5db}
+    .map-selectable img{width:var(--icon-size);height:var(--icon-size);object-fit:contain;filter:drop-shadow(0 4px 7px rgba(0,0,0,.45));pointer-events:none}
+    .stage-label{position:absolute;left:50%;top:50%;transform:translate(-50%,calc(-100% - var(--label-offset)));padding:.16rem .4rem;border-radius:999px;background:rgba(21,24,32,.72);color:white;font-weight:800;font-size:clamp(.78rem,2.2vmin,1rem);line-height:1.15;text-shadow:0 1px 2px rgba(0,0,0,.7);white-space:nowrap;pointer-events:none}
+    #stage-prep{position:fixed;inset:0;z-index:10;display:none;background:white;color:#111827;font-family:"Noto Sans KR","Malgun Gothic",system-ui,sans-serif}
+    #stage-prep.is-open{display:grid;grid-template-columns:minmax(280px,42%) 1fr;gap:0}
+    .prep-panel{padding:clamp(22px,4vw,52px);display:flex;flex-direction:column;justify-content:center}
+    .prep-left{border-right:1px solid #e5e7eb;background:#f8fafc}
+    .prep-title{font-size:clamp(1.4rem,3vw,2.4rem);font-weight:900;margin-bottom:22px}
+    .monster-card{display:grid;gap:14px;justify-items:start}
+    .monster-card img{width:min(58vw,260px);aspect-ratio:1;object-fit:contain;image-rendering:pixelated;background:#eef2ff;border:3px solid #c7d2fe;border-radius:14px;padding:12px}
+    .stat-line{font-weight:800;font-size:clamp(.95rem,1.8vw,1.15rem)}
+    .reward-box{margin-top:18px;padding:14px 16px;border-radius:12px;background:#fff7ed;border:2px solid #fdba74;font-weight:900;color:#9a3412}
+    .hero-grid{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:18px;margin:20px 0}
+    .hero-card{border:3px solid #e5e7eb;background:#f9fafb;border-radius:14px;padding:14px;display:grid;justify-items:center;gap:8px;cursor:pointer;transition:transform .16s ease,border-color .16s ease}
+    .hero-card.is-hovered{transform:scale(1.06)}
+    .hero-card.is-selected{border-color:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,.18)}
+    .hero-card img{width:min(28vw,112px);aspect-ratio:1;object-fit:contain;image-rendering:pixelated}
+    .prep-actions{display:flex;gap:12px;align-items:center}
+    .start-button,.close-prep{border:0;border-radius:12px;font-weight:900;cursor:pointer;transition:transform .16s ease,opacity .16s ease}
+    .start-button{padding:14px 28px;background:#16a34a;color:white;font-size:1.05rem}
+    .start-button:disabled{background:#9ca3af;cursor:not-allowed;opacity:.7}
+    .start-button:not(:disabled):hover,.close-prep:hover{transform:scale(1.05)}
+    .close-prep{position:absolute;right:20px;top:20px;width:42px;height:42px;background:#fee2e2;color:#b91c1c;font-size:1.1rem}
+    .prep-message{min-height:24px;font-weight:900;color:#166534}
+    @media (max-width:760px){#stage-prep.is-open{grid-template-columns:1fr;overflow:auto}.prep-left{border-right:0;border-bottom:1px solid #e5e7eb}.hero-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<main id="battle-scene">
+  <img id="battle-background" alt="">
+  <div id="object-layer"></div>
+</main>
+<script>
+window.BATTLE_MAP_CONFIG={
+  mapId:"battle_map_1",
+  title:"Battle Map 1",
+  background:"../assets/generated/map_1.png",
+  stageIcon:"../assets/generated/stage.png",
+  portalIcon:"../assets/generated/portal.png",
+  requiredVisibleBounds:{minX:.1,maxX:.9,minY:.2,maxY:.8},
+  stages:[
+    {id:"stage_1_1",label:"1-1",coordinates:{x:.45,y:.68}},
+    {id:"stage_1_2",label:"1-2",coordinates:{x:.63,y:.61}},
+    {id:"stage_1_3",label:"1-3",coordinates:{x:.50,y:.53}},
+    {id:"stage_1_4",label:"1-4",coordinates:{x:.38,y:.42}},
+    {id:"stage_1_5",label:"1-5",coordinates:{x:.55,y:.37}}
+  ],
+  portals:[
+    {id:"upper-left",label:"Farm Village Portal",coordinates:{x:.25,y:.70},destinations:[{label:"Farm Village",mapId:"farm_village",portalId:"battle"}]},
+    {id:"lower-right",label:"Map 2 Portal",coordinates:{x:.75,y:.38},requiresStage:"1-5",destinations:[{label:"Map 2",mapId:"map2",portalId:"upper-left"}]}
+  ]
+};
+</script>
+<script src="battle_map_engine.js"></script>
+</body>
+</html>

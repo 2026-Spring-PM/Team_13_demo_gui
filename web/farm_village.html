@@ -1,0 +1,1569 @@
+﻿<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>농장 마을</title>
+  <style>
+    :root{color-scheme:light}*{box-sizing:border-box;margin:0;padding:0}
+    html,body{width:100%;height:100%;overflow:hidden;background:#1a3a2a;
+      font-family:"Noto Sans KR","Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif}
+    canvas{display:block;cursor:pointer;touch-action:none;position:absolute}
+  </style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+const cv=document.getElementById("game"),cx=cv.getContext("2d");
+const FT='"Noto Sans KR","Malgun Gothic","Apple SD Gothic Neo",sans-serif';
+const FARM_DAY_SECONDS=300;
+const FARM_SESSION_LANGUAGE_KEY="farmVillageSessionLanguage";
+const DAILY_SUPPORT_GOLD=20;
+const TRAINING_MAX_LEVEL=10;
+
+/* === RESPONSIVE LANDSCAPE === */
+let W,H,TL,CO,RO,sc=1;
+function resize(){
+  CO=28;RO=23;TL=36;W=CO*TL;H=RO*TL;
+  cv.width=W;cv.height=H;
+  const sx=innerWidth/W,sy=innerHeight/H;sc=Math.min(sx,sy);
+  cv.style.width=(W*sc)+"px";cv.style.height=(H*sc)+"px";
+  cv.style.left=((innerWidth-W*sc)/2)+"px";cv.style.top=((innerHeight-H*sc)/2)+"px";
+}
+resize();addEventListener("resize",resize);
+
+/* === ASSETS === */
+const AF={
+  soil:"soil_tile.png",
+  fence:"fence.png",
+  house:"house.png",
+  market:"market.png",workshop:"workshop.png",milk:"milk.png",egg:"egg.png",fleece:"fleece.png",
+  cow:"cow.png",sheep:"sheep.png",chicken:"chicken.png",
+  farmer:"farmer.png",battlePortal:"portal.png",
+  iconPlant:"icon_plant.png",iconHarvest:"icon_harvest.png",
+  iconBuy:"icon_buy.png",iconSell:"icon_sell.png",
+  iconBattle:"icon_battle.png",iconNextDay:"icon_next_day.png",
+  uiHud:"ui_hud_panel.png",uiEvent:"ui_event_banner.png",
+  homeStart:"home_start_background.png",
+  trainingScreen:"training_screen_bg.png",
+  portalScreen:"portal_screen_bg.png",shopScreen:"shop_screen_bg.png",
+  battleAtlas:"battle_character_atlas.png",
+  heroFireBattle:"assets/generated/battle_actions/ch_00_0.png",
+  heroWaterBattle:"assets/generated/battle_actions/ch_01_0.png",
+  heroGrassBattle:"assets/generated/battle_actions/ch_02_0.png",
+  heroFire:"assets/generated/hero_fire.png",heroWater:"assets/generated/hero_water.png",heroGrass:"assets/generated/hero_grass.png",
+  fireBerry:"assets/generated/fire_berry.png",waterBerry:"assets/generated/water_berry.png",grassBerry:"assets/generated/grass_berry.png",
+  fireApple:"assets/generated/fire_apple.png",waterApple:"assets/generated/water_apple.png",grassApple:"assets/generated/grass_apple.png",
+  fireBerrySeed:"assets/generated/fire_berry_seed.png",waterBerrySeed:"assets/generated/water_berry_seed.png",grassBerrySeed:"assets/generated/grass_berry_seed.png",
+  fireAppleSeed:"assets/generated/fire_apple_seed.png",waterAppleSeed:"assets/generated/water_apple_seed.png",grassAppleSeed:"assets/generated/grass_apple_seed.png"
+};
+const A={};for(const[k,f]of Object.entries(AF)){const i=new Image();i.src=f.includes("/")?`../${f}`:`../assets/generated/${f}`;A[k]=i;}
+function iO(k){const i=A[k];return i&&i.complete&&i.naturalWidth>0;}
+function dI(k,x,y,w,h,ax=.5,ay=.5,a=1){if(!iO(k))return false;cx.save();cx.globalAlpha=a;cx.drawImage(A[k],x-w*ax,y-h*ay,w,h);cx.restore();return true;}
+function dILive(k,x,y,w,h,ax=.5,ay=.5,a=1,phase=0,power=1){
+  if(!iO(k))return false;
+  const bob=Math.sin(S.an*2.2+phase)*3*power,tilt=Math.sin(S.an*1.6+phase)*.035*power,breath=1+Math.sin(S.an*2.8+phase)*.025*power;
+  cx.save();
+  cx.globalAlpha=a;
+  cx.translate(x,y+bob);
+  cx.rotate(tilt);
+  cx.scale(breath,1+(breath-1)*.55);
+  cx.shadowColor="rgba(15,23,42,.24)";
+  cx.shadowBlur=12*power;
+  cx.shadowOffsetY=8*power;
+  cx.drawImage(A[k],-w*ax,-h*ay,w,h);
+  cx.restore();
+  return true;
+}
+function dBattleHero(sprite,x,y,w,h,a=1,phase=0,power=1){
+  if(!iO("battleAtlas"))return false;
+  const img=A.battleAtlas,col=sprite%4,row=Math.floor(sprite/4);
+  const sw=img.naturalWidth/4,sh=img.naturalHeight/4;
+  const bob=Math.sin(S.an*2.4+phase)*3*power,tilt=Math.sin(S.an*1.7+phase)*.035*power,breath=1+Math.sin(S.an*2.9+phase)*.028*power;
+  cx.save();
+  cx.globalAlpha=a;
+  cx.translate(x,y+bob);
+  cx.rotate(tilt);
+  cx.scale(breath,1+(breath-1)*.45);
+  cx.shadowColor="rgba(15,23,42,.22)";
+  cx.shadowBlur=12*power;
+  cx.shadowOffsetY=8*power;
+  cx.drawImage(img,col*sw,row*sh,sw,sh,-w*.5,-h*.72,w,h);
+  cx.restore();
+  return true;
+}
+
+/* === TILE MAP (28 cols 횞 18 rows, TL=36) ===
+  COMPACT layout ??wide roads (3 tiles), zones close together, minimal walking.
+
+  Row 0-1: HUD overlay area
+  
+  LAYOUT (approx):
+  ?뚢???????????????????????????????????????
+  ??[  FARM 8횞7  ]  R  [ TRAIN 5횞5 ]   ??
+  ??              O     ??             ??
+  ??              A  [ HOME 6횞5  ]     ??
+  ??[ RANCH 5횞6 ] D  [ SHOP 6횞5  ]    ??
+  ?붴???????????????????????????????????????
+  
+  Roads are 3 tiles wide for easy movement.
+*/
+
+const T={GRASS:0,ROAD:1,FARM:2,RANCH:3,TRAINING:4,HOME:5,SHOP:6,WATER:7};
+const grid=Array.from({length:RO},()=>Array(CO).fill(T.GRASS));
+function fG(r1,c1,r2,c2,t){for(let r=r1;r<=r2;r++)for(let c=c1;c<=c2;c++)if(r>=0&&r<RO&&c>=0&&c<CO)grid[r][c]=t;}
+
+// Zones ??packed tight, shifted down 2 rows for HUD space
+const ZF={r1:3,c1:1,r2:9,c2:7,type:T.FARM,label:"농장"};
+const ZR={r1:14,c1:1,r2:20,c2:7,type:T.RANCH,label:"가축장"};
+const ZT={r1:3,c1:20,r2:8,c2:25,type:T.TRAINING,label:"훈련소"};
+const ZH={r1:10,c1:21,r2:13,c2:24,type:T.HOME,label:"전투 포탈"};
+const ZS={r1:15,c1:20,r2:20,c2:25,type:T.SHOP,label:"상점"};
+const ZONES=[ZF,ZR,ZT,ZH,ZS];
+for(const z of ZONES)fG(z.r1,z.c1,z.r2,z.c2,z.type);
+
+// WIDE ROADS (3 tiles wide), shifted +2
+fG(4,10,19,13,T.ROAD);
+fG(4,10,6,19,T.ROAD);
+fG(11,10,12,19,T.ROAD);
+fG(17,10,19,19,T.ROAD);
+
+fG(6,8,7,9,T.ROAD);
+fG(16,8,17,9,T.ROAD);
+fG(5,19,6,19,T.ROAD);
+fG(11,19,12,20,T.ROAD);
+fG(17,19,18,19,T.ROAD);
+
+/* === CROP SLOTS (6횞6 inside farm) === */
+const CR1=ZF.r1+1,CC1=ZF.c1+1,CRN=5,CCN=5;
+const crops=[];
+for(let r=0;r<CRN;r++)for(let c=0;c<CCN;c++)
+  crops.push({gr:CR1+r,gc:CC1+c,state:"empty",growTimer:0,crop:null,pulse:0,sway:(r*CCN+c)*.3});
+
+const CROP_TYPES=[
+  {id:"fire_berry",seed:"fire_berry_seed",label:"불꽃 베리",element:"fire",category:"berry",grow:10,exp:10,cropIcon:"fireBerry",seedIcon:"fireBerrySeed",color:"#ef4444"},
+  {id:"water_berry",seed:"water_berry_seed",label:"물 베리",element:"water",category:"berry",grow:10,exp:10,cropIcon:"waterBerry",seedIcon:"waterBerrySeed",color:"#3b82f6"},
+  {id:"grass_berry",seed:"grass_berry_seed",label:"풀 베리",element:"grass",category:"berry",grow:10,exp:10,cropIcon:"grassBerry",seedIcon:"grassBerrySeed",color:"#22c55e"},
+  {id:"fire_apple",seed:"fire_apple_seed",label:"불꽃 사과",element:"fire",category:"apple",grow:30,exp:100,cropIcon:"fireApple",seedIcon:"fireAppleSeed",color:"#f97316"},
+  {id:"water_apple",seed:"water_apple_seed",label:"물 사과",element:"water",category:"apple",grow:30,exp:100,cropIcon:"waterApple",seedIcon:"waterAppleSeed",color:"#06b6d4"},
+  {id:"grass_apple",seed:"grass_apple_seed",label:"풀 사과",element:"grass",category:"apple",grow:30,exp:100,cropIcon:"grassApple",seedIcon:"grassAppleSeed",color:"#84cc16"}
+];
+const HEROES=[
+  {element:"fire",label:"불꽃 영웅",icon:"heroFire",battleIcon:"heroFireBattle",sprite:0,level:1,exp:0,color:"#ef4444"},
+  {element:"water",label:"물 영웅",icon:"heroWater",battleIcon:"heroWaterBattle",sprite:1,level:1,exp:0,color:"#3b82f6"},
+  {element:"grass",label:"풀 영웅",icon:"heroGrass",battleIcon:"heroGrassBattle",sprite:2,level:1,exp:0,color:"#22c55e"}
+];
+function cropDef(id){return CROP_TYPES.find(c=>c.id===id);}
+function cropsByElement(element,category){return CROP_TYPES.find(c=>c.element===element&&c.category===category);}
+function reqExp(hero){return 100+(hero.level-1)*50;}
+function heroAttack(hero){return 10+hero.level*2;}
+function heroHp(hero){return 50+hero.level*10;}
+function trainingLevel(){return cl(S.trainingCenter?.level||0,0,TRAINING_MAX_LEVEL);}
+function trainingNextLevel(){return Math.min(TRAINING_MAX_LEVEL,trainingLevel()+1);}
+function trainingUpgradeCost(level=trainingNextLevel()){return 40+level*20+level*level*5;}
+function trainingUpgradeSeconds(level=trainingNextLevel()){return 8+level*4;}
+function trainingBonusPercent(level=trainingLevel()){return Math.max(0,level-1)*10;}
+function trainingExpMultiplier(){return 1+trainingBonusPercent()/100;}
+function boostedCropExp(crop){return Math.max(1,Math.round(crop.exp*trainingExpMultiplier()));}
+function trainingJob(){return S.trainingCenter?.job||null;}
+function trainingReady(){return trainingLevel()>0;}
+function trainingCanStartUpgrade(){
+  const level=trainingLevel(),target=level+1;
+  if(trainingJob())return {ok:false,msg:"이미 건설 작업이 진행 중이에요."};
+  if(level>=TRAINING_MAX_LEVEL)return {ok:false,msg:"훈련소는 이미 최대 레벨이에요."};
+  if(S.level<target)return {ok:false,msg:`훈련소 ${target}레벨은 캐릭터 레벨 ${target}부터 가능해요.`};
+  const cost=trainingUpgradeCost(target);
+  if(S.gold<cost)return {ok:false,msg:`골드가 부족해요. 필요 골드: ${cost}`};
+  return {ok:true,target,cost,seconds:trainingUpgradeSeconds(target)};
+}
+
+/* === RANCH SLOTS (2x2 square) === */
+const ranch=[];
+for(let r=0;r<2;r++)for(let c=0;c<2;c++){
+  ranch.push({r1:ZR.r1+1+r*3,r2:ZR.r1+3+r*3,c1:ZR.c1+1+c*3,c2:ZR.c1+3+c*3,animal:null,idx:r*2+c});
+}
+
+/* === SHOP === */
+const shopItems=[
+  {name:"씨앗 x3",cost:12,cur:"gold",give:{seeds:3},icon:"iconPlant"},
+  {name:"소 구매",cost:30,cur:"gold",give:{cow:1},icon:"cow"},
+  {name:"양 구매",cost:25,cur:"gold",give:{sheep:1},icon:"sheep"},
+  {name:"닭 구매",cost:15,cur:"gold",give:{chicken:1},icon:"chicken"},
+  {name:"작물 판매 x5",cost:5,cur:"turnips",give:{gold:45},icon:"iconSell"},
+  {name:"우유 판매 x1",cost:1,cur:"milk",give:{gold:14},icon:"milk"},
+  {name:"달걀 판매 x3",cost:3,cur:"eggs",give:{gold:18},icon:"egg"},
+  {name:"양털 판매 x1",cost:1,cur:"wool",give:{gold:20},icon:"fleece"},
+];
+
+const LIVESTOCK_SHOP_ITEMS=shopItems.filter(i=>i.give.cow||i.give.sheep||i.give.chicken);
+const LIVESTOCK_LABELS={cow:"소",sheep:"양",chicken:"닭"};
+const ANIMAL_TYPES={
+  cow:{type:"cow",label:"소",icon:"cow",product:"milk",productLabel:"우유",yield:1,days:2,exp:12,color:"#64748b"},
+  sheep:{type:"sheep",label:"양",icon:"sheep",product:"wool",productLabel:"양털",yield:1,days:2,exp:14,color:"#a855f7"},
+  chicken:{type:"chicken",label:"닭",icon:"chicken",product:"eggs",productLabel:"달걀",yield:3,days:1,exp:10,color:"#eab308"}
+};
+function animalDef(type){return ANIMAL_TYPES[type]||ANIMAL_TYPES.cow;}
+function animalRequiredSeconds(def){return def.days*FARM_DAY_SECONDS;}
+function animalElapsedDays(animal){return Math.floor((animal.elapsed||0)/FARM_DAY_SECONDS);}
+function normalizeAnimalTimer(animal,def){
+  if(typeof animal.elapsed!=="number")animal.elapsed=(animal.progress||0)*FARM_DAY_SECONDS;
+  animal.elapsed=cl(animal.elapsed,0,animalRequiredSeconds(def));
+  animal.progress=Math.floor(animal.elapsed/FARM_DAY_SECONDS);
+}
+const RANCH_CAPACITY=ranch.length;
+function occupiedRanchCount(){return ranch.filter(s=>s.animal).length;}
+function hasRanchSpace(){return occupiedRanchCount()<RANCH_CAPACITY;}
+const SELL_PRODUCTS=[
+  {id:"milk",label:"우유",icon:"milk",price:14,color:"#64748b"},
+  {id:"eggs",label:"달걀",icon:"egg",price:6,color:"#eab308"},
+  {id:"wool",label:"양털",icon:"fleece",price:20,color:"#a855f7"}
+];
+
+/* === STATE === */
+const S={
+  day:1,dayElapsed:0,gold:200,exp:0,level:1,
+  inv:{fire_berry_seed:3,water_berry_seed:0,grass_berry_seed:0,fire_apple_seed:0,water_apple_seed:0,grass_apple_seed:0,fire_berry:0,water_berry:0,grass_berry:0,fire_apple:0,water_apple:0,grass_apple:0,milk:0,eggs:0,wool:0,wood:2,fence:1},
+  p:{r:8,c:10,f:"right"},px:10*TL+TL/2,py:8*TL+TL/2,character:{r:8,c:10,f:"right",x:10*TL+TL/2,y:8*TL+TL/2,speed:220},
+  mt:null,mv:false,ms:220,trainingCenter:{level:0,job:null}, // faster movement
+  et:"clear",ev:"맑음: 작물이 평소처럼 자랍니다.",
+  msg:"WASD 이동 · 좌클릭 상호작용",mt2:"info",mf:0,act:"마을 진입",
+  nz:null,sm:false,mi:[],mb:[],
+  ss:false,shopView:"main",seedUI:null,trainUI:false,buildUI:false,_sb:[],_sc:null,_seedButtons:[],_trainButtons:[],
+  dailyPopup:null,_dailyConfirm:null,
+  lang:null,_languageButtons:[],_langToggle:null,tutorialStep:0,tutorialDone:false,_tutorialButtons:[],
+  mx:-999,my:-999,lastCheatKeyTime:0,
+  an:0,lt:0,pop:[],par:[],lp:0,wf:0,ef:0,
+  keys:{},
+  bs:{hero:{hp:165,mhp:165},enemy:{hp:210,mhp:210},active:false},
+  stage15Cleared:false
+};
+S.heroes=HEROES;
+
+Object.defineProperties(S,{
+  seeds:{get(){return CROP_TYPES.reduce((n,c)=>n+(this.inv[c.seed]||0),0)},set(v){this.inv.fire_berry_seed=v}},
+  turnips:{get(){return CROP_TYPES.reduce((n,c)=>n+(this.inv[c.id]||0),0)},set(v){this.inv.fire_berry=v}},
+  milk:{get(){return this.inv.milk},set(v){this.inv.milk=v}},
+  eggs:{get(){return this.inv.eggs},set(v){this.inv.eggs=v}},
+  wool:{get(){return this.inv.wool},set(v){this.inv.wool=v}},
+  wood:{get(){return this.inv.wood},set(v){this.inv.wood=v}},
+  fence:{get(){return this.inv.fence},set(v){this.inv.fence=v}},
+});
+
+function characterPosition(){return{r:S.character.r,c:S.character.c,f:S.character.f};}
+function restoreCharacter(position){
+  S.character.r=position.r;S.character.c=position.c;S.character.f=position.f||"down";
+  S.character.x=S.character.c*TL+TL/2;S.character.y=S.character.r*TL+TL/2;
+}
+function moveCharacter(dr,dc,dt,canOccupy){
+  const distance=S.character.speed*dt;
+  const nextX=S.character.x+dc*distance,nextY=S.character.y+dr*distance;
+  const nextRow=Math.floor(nextY/TL),nextColumn=Math.floor(nextX/TL);
+  if(!canOccupy(nextRow,nextColumn))return false;
+  if(dr<0)S.character.f="up";else if(dr>0)S.character.f="down";else if(dc<0)S.character.f="left";else if(dc>0)S.character.f="right";
+  S.character.x=nextX;S.character.y=nextY;S.character.r=nextRow;S.character.c=nextColumn;
+  return true;
+}
+
+/* === HELPERS === */
+function cl(v,a,b){return Math.max(a,Math.min(b,v));}
+function lTh(){return S.level*100;}
+function aP(v,x,y,c,s=16){S.pop.push({v,x,y,c,s,l:1});}
+function aPa(x,y,c,n=10){for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,sp=30+Math.random()*60;S.par.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-20,r:1.5+Math.random()*2,c,l:.5+Math.random()*.3});}}
+function sM(v,t="info"){S.msg=v;S.act=v;S.mt2=t;S.mf=1;}
+function wr(v){sM(v,"warn");}
+function gE(n){S.exp+=n;while(S.exp>=lTh()){S.exp-=lTh();S.level++;S.lp=1;aP("레벨 업!",W/2,40,"#fff7a8",20);aPa(W/2,40,"#fde047",18);}}
+function grantFarmCheat(){
+  S.gold+=1000;
+  for(const crop of CROP_TYPES)S.inv[crop.id]=(S.inv[crop.id]||0)+100;
+  aP("+1000골드",W/2,H/2-18,"#facc15",18);
+  aP("6종 작물 +100",W/2,H/2+12,"#84cc16",16);
+  aPa(W/2,H/2,"#facc15",24);
+  sM("치트 발동! 1000골드와 모든 작물 100개를 얻었어요.");
+  saveFarm();
+}
+function handleCheatKey(e){
+  if(e.code!=="Backquote"||e.repeat)return false;
+  const now=performance.now();
+  if(now-S.lastCheatKeyTime<=650){
+    S.lastCheatKeyTime=0;
+    grantFarmCheat();
+  }else{
+    S.lastCheatKeyTime=now;
+  }
+  return true;
+}
+function weatherText(type){
+  return {clear:"맑음: 작물이 평소처럼 자랍니다.",drought:"가뭄: 수확량 감소.",typhoon:"태풍: 가축장의 모든 가축이 사라집니다.",flood:"홍수: 심어진 작물이 모두 사라집니다."}[type]||"맑음: 작물이 평소처럼 자랍니다.";
+}
+function weatherName(type){
+  return {clear:"맑음",drought:"가뭄",typhoon:"태풍",flood:"홍수"}[type]||"맑음";
+}
+function weatherEffect(type){
+  return {clear:"작물이 평소처럼 자랍니다.",drought:"수확량이 감소합니다.",typhoon:"가축장의 모든 가축이 즉시 사라집니다.",flood:"밭에 심어진 모든 작물이 즉시 사라집니다."}[type]||"작물이 평소처럼 자랍니다.";
+}
+
+/* === MOVEMENT === */
+function cW(r,c){if(r<0||r>=RO||c<0||c>=CO)return false;const t=grid[r][c];return t===T.ROAD||t===T.FARM||t===T.RANCH||t===T.TRAINING||t===T.HOME||t===T.SHOP;}
+function syncCharacterState(){
+  S.p=characterPosition();S.px=S.character.x;S.py=S.character.y;S.ms=S.character.speed;
+}
+function mB(dr,dc,dt){
+  if(S.sm||S.ss)return false;
+  const moved=moveCharacter(dr,dc,dt,cW);
+  syncCharacterState();cNZ();
+  return moved;
+}
+function cNZ(){const{r,c}=S.p;S.nz=null;for(const z of ZONES)if(r>=z.r1-1&&r<=z.r2+1&&c>=z.c1-1&&c<=z.c2+1){S.nz=z;break;}}
+function getKeyDir(){
+  if(S.keys.KeyW||S.keys.ArrowUp) return{dr:-1,dc:0};
+  if(S.keys.KeyS||S.keys.ArrowDown) return{dr:1,dc:0};
+  if(S.keys.KeyA||S.keys.ArrowLeft) return{dr:0,dc:-1};
+  if(S.keys.KeyD||S.keys.ArrowRight) return{dr:0,dc:1};
+  return null;
+}
+function hK(dt){
+  const newDir=getKeyDir();
+  if(S.sm||S.ss||S.showInv||S.buildUI||S.dailyPopup){S.mv=false;return;}
+  S.mv=newDir ? mB(newDir.dr,newDir.dc,dt) : false;
+}
+
+/* === FARM CLICK === */
+function hFC(gr,gc){
+  const s=crops.find(s=>s.gr===gr&&s.gc===gc);if(!s)return;
+  const px=s.gc*TL+TL/2,py=s.gr*TL+TL/2;
+  if(s.state==="empty"){
+    S.seedUI={plot:s,selectedCropId:null};sM("심을 씨앗을 선택하세요.");markTutorial("openSeed");
+  }else if(s.state==="mature"){
+    const crop=cropDef(s.crop),amt=S.et==="drought"?1:2;
+    S.inv[crop.id]=(S.inv[crop.id]||0)+amt;s.state="empty";s.growTimer=0;s.crop=null;s.pulse=1;gE(10+amt*3);
+    aP(`${crop.label} +${amt}`,px,py-12,crop.color,13);aPa(px,py,crop.color,8);
+    sM(`${crop.label} ${amt}개 수확!`);markTutorial("harvest");
+  }else if(s.state==="growing"){sM("자라는 중... 잠시 기다리세요.");}
+}
+
+function plantSeed(plot,crop){
+  if((S.inv[crop.seed]||0)<=0){wr("씨앗이 부족해요.");return;}
+  S.inv[crop.seed]--;plot.crop=crop.id;plot.state="growing";plot.growTimer=0;plot.pulse=1;S.seedUI=null;
+  const px=plot.gc*TL+TL/2,py=plot.gr*TL+TL/2;
+  aP(`${crop.label} 심기`,px,py-12,crop.color,11);aPa(px,py,crop.color,5);gE(5);
+  sM(`${crop.label}을 심었어요.`);markTutorial("plant");
+}
+
+/* === RANCH === */
+function hRC(gr,gc){
+  const s=ranch.find(s=>gr>=s.r1&&gr<=s.r2&&gc>=s.c1&&gc<=s.c2);if(!s)return;
+  if(!s.animal){sM("상점에서 가축을 구매하세요.");return;}
+  const a=s.animal,d=animalDef(a.type);
+  normalizeAnimalTimer(a,d);
+  if(a.product){
+    S.inv[d.product]=(S.inv[d.product]||0)+d.yield;
+    a.product=false;a.elapsed=0;a.progress=0;delete a.fed;delete a.feed;gE(d.exp);
+    aP(`${d.productLabel} +${d.yield}`,gc*TL+16,gr*TL,d.color,12);aPa(gc*TL+16,gr*TL,d.color,8);
+    sM(`${d.label} 생산물 수확 완료!`);
+  }else sM(`${d.label} 생산 진행 ${animalElapsedDays(a)}/${d.days}일 · 수확 후 ${d.days}일마다 생산돼요.`);
+}
+function placeAnimal(t){
+  if(!hasRanchSpace()){wr("가축장이 꽉 찼어요.");return false;}
+  const s=ranch.find(s=>!s.animal);if(!s){wr("가축장이 꽉 찼어요.");return false;}
+  const d=animalDef(t);
+  s.animal={type:t,product:false,progress:0,elapsed:0};
+  sM(`${d.label} 배치 완료. ${d.days}일 뒤 ${d.productLabel}을 얻어요.`);markTutorial("livestock");
+  return true;
+}
+
+/* === SHOP === */
+function hSB(item){
+  const c=item.cur,cost=item.cost;
+  if(c==="gold"){if(S.gold<cost){wr("골드 부족.");return;}}else{if((S.inv[c]||0)<cost){wr("재료 부족.");return;}}
+  if(c==="gold")S.gold-=cost;else S.inv[c]-=cost;
+  for(const[k,v]of Object.entries(item.give)){
+    if(k==="gold")S.gold+=v;
+    else if(k==="cow"||k==="sheep"||k==="chicken"){if(!placeAnimal(k)){if(c==="gold")S.gold+=cost;else S.inv[c]+=cost;return;}}
+    else S.inv[k]=(S.inv[k]||0)+v;
+  }
+  gE(8);aP("거래 완료",W/2,H/2,"#166534",14);aPa(W/2,H/2,"#facc15",16);sM(`${item.name} 완료!`);
+}
+
+function buySeed(crop){
+  const price=crop.category==="apple"?30:12;
+  if(crop.category==="apple"&&!S.stage15Cleared){wr("1-5 클리어 후 구매 가능해요.");return;}
+  if(S.gold<price){wr("골드 부족.");return;}
+  S.gold-=price;S.inv[crop.seed]=(S.inv[crop.seed]||0)+3;gE(5);aPa(W/2,H/2,crop.color,14);sM(`${crop.label} 씨앗 3개 구매!`);
+}
+
+function sellItem(item){
+  if((S.inv[item.id]||0)<=0){wr(`${item.label} 부족.`);return;}
+  S.inv[item.id]--;S.gold+=item.price;gE(3);
+  aP(`+${item.price}골드`,W/2,H/2,item.color||"#facc15",14);aPa(W/2,H/2,item.color||"#facc15",10);
+  sM(`${item.label} 판매 완료.`);
+}
+
+function animalSellPrice(type){
+  return {cow:25,sheep:20,chicken:10}[type]||10;
+}
+
+function countAnimals(type){
+  return ranch.filter(slot=>slot.animal&&slot.animal.type===type).length;
+}
+
+function sellAnimalType(type){
+  const slot=ranch.find(slot=>slot.animal&&slot.animal.type===type);
+  if(!slot){wr(`${animalDef(type).label} 부족.`);return;}
+  sellAnimalSlot(slot);
+}
+
+function sellAnimalSlot(slot){
+  if(!slot||!slot.animal){wr("판매할 가축이 없어요.");return;}
+  const d=animalDef(slot.animal.type),price=animalSellPrice(slot.animal.type);
+  slot.animal=null;S.gold+=price;gE(4);
+  aP(`+${price}골드`,W/2,H/2,d.color||"#facc15",14);aPa(W/2,H/2,d.color||"#facc15",12);
+  sM(`${d.label} 판매 완료.`);
+}
+
+function drawShopMenuOption(px,py,pw,y,index,label,view,accent,desc){
+  const hot=hoverRect({x:px+76,y,w:pw-152,h:56}),lift=hot?-2:0;
+  uiShadow(px+76,y+lift,pw-152,56,14,.12);
+  fR(px+76,y+lift,pw-152,56,14,hot?"rgba(255,255,255,.96)":"rgba(255,255,255,.78)");
+  sR(px+76,y+lift,pw-152,56,14,accent+"99",hot?2.2:1.4);
+  fR(px+92,y+15+lift,28,28,14,accent+"22");sR(px+92,y+15+lift,28,28,14,accent+"88",1);
+  fT(String(index),px+106,y+29+lift,18,12,accent,"center",950);
+  fT(label,W/2-18,y+21+lift,240,15,"#1f2937","center",950);
+  fT(desc,W/2-18,y+41+lift,280,9,"#64748b","center",760);
+  fT(">",px+pw-100,y+28+lift,18,16,accent,"center",900);
+  S._sb.push({x:px+76,y,w:pw-152,h:56,view,cB:true});
+}
+
+function trainHero(hero,crop){
+  if(!trainingReady()){wr("훈련소를 먼저 지어야 영웅을 훈련할 수 있어요.");return;}
+  if((S.inv[crop.id]||0)<=0){wr(`${crop.label}이 없어요.`);return;}
+  const gain=boostedCropExp(crop);
+  S.inv[crop.id]--;hero.exp+=gain;
+  while(hero.exp>=reqExp(hero)){hero.exp-=reqExp(hero);hero.level++;S.lp=1;aP(`${hero.label} 레벨 ${hero.level}`,W/2,48,hero.color,16);aPa(W/2,52,hero.color,20);}
+  aPa(W/2,H/2,hero.color,12);
+  sM(`${hero.label} 훈련 완료. 경험치 +${gain}`);markTutorial("trainHero");
+}
+
+/* === NEXT DAY / BUILD / BATTLE === */
+function startTrainingUpgrade(){
+  const check=trainingCanStartUpgrade();
+  if(!check.ok){wr(check.msg);return false;}
+  S.gold-=check.cost;
+  S.trainingCenter.job={target:check.target,remaining:check.seconds,total:check.seconds};
+  S.sm=false;S.buildUI=false;
+  const label=check.target===1?"훈련소 건설":"훈련소 업그레이드";
+  sM(`${label} 시작!`);
+  aP(`${label} ${check.seconds}초`,zC(ZT).x,zC(ZT).y-30,"#1d4ed8",13);
+  markTutorial("buildTraining");
+  return true;
+}
+function updateTrainingConstruction(dt){
+  const job=trainingJob();if(!job)return;
+  job.remaining-=dt;
+  if(job.remaining>0)return;
+  const finished=job.target;
+  S.trainingCenter.level=finished;
+  S.trainingCenter.job=null;
+  S.buildUI=false;
+  const label=finished===1?"훈련소 완성":"훈련소 업그레이드 완료";
+  aP(`${label} Lv.${finished}`,zC(ZT).x,zC(ZT).y-34,"#2563eb",15);
+  aPa(zC(ZT).x,zC(ZT).y,"#bfdbfe",20);
+  sM(`${label}! 작물 훈련 추가 경험치 +${trainingBonusPercent()}%`);
+}
+function openTrainingBuildMenu(){
+  S.trainUI=false;S.sm=false;S.buildUI=true;S.nz=ZT;
+}
+function openTrainingInteraction(){
+  if(!trainingReady()||trainingJob()){openTrainingBuildMenu();return;}
+  S.trainUI=true;
+}
+function clearPlantedCropsForFlood(){
+  let removed=0;
+  for(const s of crops){
+    if(s.state!=="empty"){
+      s.state="empty";s.growTimer=0;s.crop=null;s.pulse=1;
+      removed++;
+    }
+  }
+  if(removed>0)aP(`작물 ${removed}칸 유실`,W/2,H/2-20,"#1e40af",13);
+  return removed;
+}
+function clearRanchAnimalsForTyphoon(){
+  let removed=0;
+  for(const s of ranch){
+    if(s.animal){s.animal=null;removed++;}
+  }
+  if(removed>0)aP(`가축 ${removed}마리 유실`,W/2,H/2-20,"#475569",13);
+  return removed;
+}
+function openDailyPopup(){
+  S.dailyPopup={day:S.day,gold:DAILY_SUPPORT_GOLD,weather:S.et,remaining:30};
+  S._dailyConfirm=null;
+}
+function closeDailyPopup(){
+  S.dailyPopup=null;
+  S._dailyConfirm=null;
+}
+function nextDay(resetClock=true){S.sm=false;if(resetClock)S.dayElapsed=0;S.day++;const r=Math.random();S.ef=1;S.wf=1;
+  if(r<.16){S.et="drought";}
+  else if(r<.30){S.et="typhoon";clearRanchAnimalsForTyphoon();}
+  else if(r<.40){S.et="flood";clearPlantedCropsForFlood();}
+  else{S.et="clear";}
+  S.ev=weatherText(S.et);
+  if(S.day%3===0){S.wood++;aP("나무 +1",W/2,H/2-30,"#92400e",13);}
+  S.gold+=DAILY_SUPPORT_GOLD;
+  gE(6);aP("새 아침",W/2,30,"#fff7a8",18);aP(`+${DAILY_SUPPORT_GOLD}골드`,W/2,54,"#facc15",13);
+  sM(`새로운 하루! 생활 지원금 +${DAILY_SUPPORT_GOLD}골드`);
+  openDailyPopup();}
+function updateRanchProduction(dt){
+  let readyProducts=0;
+  for(const s of ranch)if(s.animal&&!s.animal.product){
+    const d=animalDef(s.animal.type),need=animalRequiredSeconds(d);
+    normalizeAnimalTimer(s.animal,d);
+    s.animal.elapsed+=dt;
+    s.animal.progress=Math.floor(s.animal.elapsed/FARM_DAY_SECONDS);
+    if(s.animal.elapsed>=need){
+      s.animal.elapsed=need;s.animal.progress=d.days;s.animal.product=true;readyProducts++;
+    }
+  }
+  if(readyProducts>0){
+    aP(`가축 생산물 ${readyProducts}개 준비`,W/2,H/2-22,"#f97316",13);
+    sM(`가축 생산물 ${readyProducts}개가 준비됐어요.`);
+  }
+}
+function advanceFarmClock(dt){
+  S.dayElapsed+=dt;
+  while(S.dayElapsed>=FARM_DAY_SECONDS){
+    S.dayElapsed-=FARM_DAY_SECONDS;
+    nextDay(false);
+  }
+}
+function farmClockText(){return `${S.day}일차`;}
+function clockProgress(){return cl(S.dayElapsed/FARM_DAY_SECONDS,0,1);}
+function clockTimeText(){
+  const elapsed=Math.floor(S.dayElapsed),total=FARM_DAY_SECONDS;
+  const fmt=s=>`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
+  return `${fmt(elapsed)} / ${fmt(total)}`;
+}
+function openBattle(){S.sm=false;if(!trainingReady()){wr("전투 포탈을 사용하려면 먼저 훈련소를 지어야 해요.");return;}sM("전투 포탈 진입...");aPa(zC(ZH).x,zC(ZH).y,"#818cf8",26);markTutorial("battle");saveFarm();sessionStorage.setItem("battleSpawnPortal","upper-left");location.href="battle_map_1.html?spawn=upper-left"+(S.lang==="en"?"&lang=en":"");}
+
+/* === ZONE MENU === */
+function openMenu(){if(!S.nz)return;const z=S.nz;
+  if(z===ZS){S.ss=!S.ss;S.shopView="main";return;}
+  if(z===ZT){openTrainingInteraction();return;}
+  if(z===ZH){openBattle();return;}
+  S.sm=true;S.mi=[];
+  if(z===ZF)S.mi=[{l:"다음 날",f:nextDay}];
+  if(z===ZR)S.mi=[{l:"다음 날",f:nextDay}];
+  S.mi.push({l:"닫기",f:()=>{S.sm=false;}});}
+
+/* === DRAW UTILS === */
+function rP(x,y,w,h,r){const R=Math.min(r,w/2,h/2);cx.beginPath();cx.moveTo(x+R,y);cx.arcTo(x+w,y,x+w,y+h,R);cx.arcTo(x+w,y+h,x,y+h,R);cx.arcTo(x,y+h,x,y,R);cx.arcTo(x,y,x+R,y,R);cx.closePath();}
+function fR(x,y,w,h,r,f){rP(x,y,w,h,r);cx.fillStyle=f;cx.fill();}
+function sR(x,y,w,h,r,s,lw=2){rP(x,y,w,h,r);cx.strokeStyle=s;cx.lineWidth=lw;cx.stroke();}
+const EN_EXACT={
+  "농장":"Farm","가축장":"Ranch","훈련소":"Training","전투 포탈":"Battle Portal","상점":"Shop","레벨업":"Level Up",
+  "불꽃 베리":"Fire Berry","물 베리":"Water Berry","풀 베리":"Grass Berry","불꽃 사과":"Fire Apple","물 사과":"Water Apple","풀 사과":"Grass Apple",
+  "불꽃 영웅":"Fire Hero","물 영웅":"Water Hero","풀 영웅":"Grass Hero","소":"Cow","양":"Sheep","닭":"Chicken","우유":"Milk","달걀":"Eggs","양털":"Wool",
+  "맑음":"Clear","가뭄":"Drought","태풍":"Typhoon","홍수":"Flood","농장 마을":"Farm Village","인벤토리":"Inventory","레벨 업!":"Level Up!",
+  "WASD 이동 · 좌클릭 상호작용":"WASD move · left-click interact","마을 진입":"Entered village",
+  "맑음: 작물이 평소처럼 자랍니다.":"Clear: crops grow normally.","가뭄: 수확량 감소.":"Drought: harvest yield reduced.","태풍: 가축장의 모든 가축이 사라집니다.":"Typhoon: all ranch animals are lost.","홍수: 심어진 작물이 모두 사라집니다.":"Flood: planted crops are washed away.",
+  "심을 씨앗이 없어요.":"No seeds available to plant.","심을 씨앗을 선택하세요.":"Choose a seed to plant.","자라는 중... 잠시 기다리세요.":"Growing... please wait.","씨앗이 부족해요.":"Not enough seeds.",
+  "상점에서 가축을 구매하세요.":"Buy livestock from the shop.","가축장이 꽉 찼어요.":"The ranch is full.",
+  "골드 부족.":"Not enough Gold.","재료 부족.":"Not enough materials.","거래 완료":"Trade complete","1-5 클리어 후 구매 가능해요.":"Available after clearing 1-5.","훈련소를 먼저 지어야 영웅을 훈련할 수 있어요.":"Build the Training Center before training heroes.",
+  "이미 건설 작업이 진행 중이에요.":"Construction is already in progress.","골드가 부족해요.":"Not enough Gold.",
+  "훈련소 건설":"Build Training Center","훈련소 업그레이드":"Upgrade Training Center","훈련소 완성":"Training Center Complete","훈련소 업그레이드 완료":"Training Center Upgrade Complete","훈련소 작업이 진행 중이에요.":"Training Center work is in progress.","훈련소는 이미 최대 레벨이에요.":"Training Center is already max level.","영웅 훈련":"Hero Training","최대 레벨":"Max Level","닫기":"Close","확인":"OK",
+  "새 아침":"New Morning","전투 포탈을 사용하려면 먼저 훈련소를 지어야 해요.":"Build the Training Center before using the Battle Portal.","전투 포탈 진입...":"Entering Battle Portal...",
+  "씨앗 심기":"Plant Seeds","수확하기":"Harvest Crops","훈련소 짓기":"Build Training","영웅 기르기":"Train Hero","전투 입장":"Enter Battle","가축 확인":"Check Livestock","씨앗 심기 액션 완료":"Complete a seed planting action","성숙한 작물 클릭":"Click a mature crop","훈련소 건설 시작":"Start Training Center construction","영웅 훈련 1회 완료":"Complete one hero training","전투 포탈 클릭":"Click the Battle Portal","튜토리얼 완료. 농장 운영을 시작하세요.":"Tutorial complete. Start managing the farm.","튜토리얼을 건너뛰었어요. 언제든 구역 안내를 보며 진행할 수 있어요.":"Tutorial skipped. Zone hints are still available.",
+  "밭 근처로 이동한 뒤 빈 밭을 클릭하고, 씨앗 선택 화면에서 씨앗을 실제로 심어보세요.":"Move near the farm, click an empty plot, then plant a real seed in the seed picker.",
+  "작물이 다 자라면 같은 밭을 클릭해서 직접 수확하세요. 성장 막대가 끝날 때까지 잠시 기다리면 됩니다.":"When the crop matures, click the same plot to harvest it. Wait until the growth bar fills.",
+  "훈련소 공터로 이동해 클릭한 뒤 건설 메뉴에서 훈련소 건설을 시작하세요.":"Move to the Training Lot, click it, then start building the Training Center from the menu.",
+  "훈련소가 완성되면 다시 클릭해 영웅 훈련 화면을 열고, 수확한 작물을 눌러 영웅 경험치를 올리세요.":"When construction finishes, click it again to open Hero Training, then spend a harvested crop to raise hero EXP.",
+  "전투 포탈로 이동해 클릭하면 실제 전투 화면으로 넘어갑니다.":"Move to the Battle Portal and click it to enter the battle screen.",
+  "상점에서 가축을 사면 작물 먹이 없이 날짜 진행만으로 생산물이 준비됩니다.":"Buy livestock from the shop; products become ready as days pass without crop feeding.",
+  "현재 단계":"Current Step","해야 할 일":"Action","완료 조건":"Complete By","건너뛰기":"Skip","진행 중인 화면에서 직접 행동하세요":"Do the action directly on the current screen",
+  "영어 / 한국어 선택":"Choose Language","플레이 언어를 선택하세요":"Select your play language","English":"English","한국어":"Korean","언어는 현재 세션에 저장됩니다.":"Your language is saved for this session.",
+  "스테이지 입장":"Stage Entry","상점에서 구입한 씨앗 심기":"Plant seeds bought at the shop","성장한 작물 수확":"Harvest grown crops","상점에서 구입한 가축 배치":"Place livestock bought at the shop","가축이 일정 날짜마다 생산물 생산":"Livestock produce goods every few days","작물로 영웅 레벨업":"Level up heroes with crops","전투 맵으로 이동해 몬스터와 전투":"Go to battle maps and fight monsters","씨앗, 가축 구매":"Buy seeds and livestock","작물과 생산물 판매":"Sell crops and products","준비된 생산물을 클릭해 회수":"Click ready products to collect",
+  "Space / 클릭으로 훈련":"Space / click to train","가까이서 클릭해 입장":"Click nearby to enter","클릭으로 카테고리 선택":"Click to choose a category","밭 클릭으로 상호작용":"Click a plot to interact",
+  "훈련소 공사":"Training Construction","준비 중":"Preparing","남은 시간":"Time left","클릭으로 진행 상태 확인":"Click to check progress","훈련소 공터":"Training Lot","건설 가능":"Buildable","클릭으로 훈련소 건설":"Click to build Training Center","작물 훈련 추가 경험치":"Crop Training Bonus EXP","작물을 영웅 경험치로 전환":"Convert crops into hero EXP","클릭으로 훈련":"Click to train","잠긴 전투 포탈":"Locked Battle Portal","훈련소 필요":"Training Center Needed","훈련소를 지어야 사용할 수 있음":"Build the Training Center to unlock","클릭하면 안내 표시":"Click for guidance",
+  "잠김":"Locked","빈칸":"Empty","성장중":"Growing","클릭: 전투 입장":"Click: Enter Battle","훈련소 건설 필요":"Training Center needed","클릭: 상점 열기":"Click: Open Shop","클릭: 영웅 훈련":"Click: Hero Training",
+  "클릭: 훈련소 건설":"Click: Build Training Center","작업 중":"Working",
+  "[I] 인벤토리":"[I] Inventory","가축":"Livestock","골드":"Gold","경험치":"EXP","씨앗":"Seeds","작물":"Crops","보유":"Owned","판매":"Sell","구매":"Buy","가득 참":"Full","뒤로":"Back",
+  "씨앗 구매":"Buy Seeds","가축 구매":"Buy Livestock","작물 성장의 시작":"Start crop growth","목장 생산력 확장":"Expand ranch production","수확물을 골드로 전환":"Turn harvests into Gold","심을 씨앗 선택":"Choose Seed","밭에 심을 작물을 고르고 성장 보상을 확인":"Pick a crop for this field and check growth rewards","씨앗 없음":"No seeds","긴 성장":"Long growth","빠른 성장":"Fast growth","선택한 씨앗 심기":"Plant selected seed","선택한 밭":"Selected field","전체 씨앗":"Total seeds",
+  "작물을 선택하세요":"Choose a crop","보유한 씨앗 없음":"No seeds owned","왼쪽에서 씨앗을 고르면 정보가 표시됩니다.":"Choose a seed on the left to see details.","상점에서 씨앗을 구매한 뒤 심을 수 있습니다.":"Buy seeds from the shop before planting.",
+  "씨앗 x3":"Seeds x3","소 구매":"Buy Cow","양 구매":"Buy Sheep","닭 구매":"Buy Chicken","작물 판매 x5":"Sell Crops x5","우유 판매 x1":"Sell Milk x1","달걀 판매 x3":"Sell Eggs x3","양털 판매 x1":"Sell Wool x1","판매할 가축이 없어요.":"No livestock to sell.",
+  "작물 판매":"Sell Crops","가축 및 생산물 판매":"Sell Livestock and Products","6종 작물 판매":"Sell six crop types","가축과 생산물 판매":"Sell livestock and products","씨앗, 가축, 판매 품목을 한 곳에서 관리":"Manage seeds, livestock, and sales in one place","1-5 클리어 필요":"Clear 1-5 first",
+  "훈련소 업그레이드":"Training Center Upgrade","최대 레벨입니다.":"Max level reached.","업그레이드 진행 중":"Upgrade in progress","업그레이드 가능":"Upgrade available","필요":"Need","캐릭터":"Character","진행 중":"In Progress","완료":"Done","공격":"ATK","체력":"HP","베리":"Berry","사과":"Apple",
+  "작업이 끝나면 훈련소를 사용할 수 있어요.":"You can use the Training Center when the work finishes.","건설을 시작할 수 있어요.":"Construction can start.","건설 진행 중":"Construction in progress","필요 골드":"Required Gold","건설 시간":"Build Time","건설 중":"Building","건설 시작":"Start Build",
+  "작물이 평소처럼 자랍니다.":"Crops grow normally.","수확량이 감소합니다.":"Harvest yield is reduced.","가축장의 모든 가축이 즉시 사라집니다.":"All livestock in the ranch are lost immediately.","밭에 심어진 모든 작물이 즉시 사라집니다.":"All planted crops in the fields are washed away immediately.",
+  "치트 발동! 1000골드와 모든 작물 100개를 얻었어요.":"Cheat activated! Gained 1000 Gold and 100 of every crop.","6종 작물 +100":"Six crop types +100",
+  "작물밭에 더 가까이 가세요.":"Move closer to the field.","가축장에 더 가까이 가세요.":"Move closer to the ranch.","상점에 더 가까이 가세요.":"Move closer to the shop.","훈련소에 더 가까이 가세요.":"Move closer to the Training Center.","전투 포탈에 더 가까이 가세요.":"Move closer to the Battle Portal."
+};
+const EN_PARTS=[
+  ["불꽃 베리","Fire Berry"],["물 베리","Water Berry"],["풀 베리","Grass Berry"],["불꽃 사과","Fire Apple"],["물 사과","Water Apple"],["풀 사과","Grass Apple"],["불꽃 영웅","Fire Hero"],["물 영웅","Water Hero"],["풀 영웅","Grass Hero"],
+  ["생활 지원금","daily support"],["가축 생산물","livestock product"],["생산물 수확 완료","product collected"],["생산 진행","production progress"],["다음 날 자동으로 자라요","grows automatically next day"],["배치 완료","placed"],["현재 단계","Current Step"],["완료 조건","Complete By"],["해야 할 일","Action"],["일 뒤","days until"],["을 얻어요","ready"],["를 얻어요","ready"],["이 없어요"," unavailable"],["부족","shortage"],["완료","complete"],["시작","start"],["작업 중","working"],["업그레이드","upgrade"],["건설","build"],["골드","Gold"],["씨앗","Seeds"],["작물","Crops"],["가축","Livestock"],["우유","Milk"],["달걀","Eggs"],["양털","Wool"],["소","Cow"],["양","Sheep"],["닭","Chicken"],["레벨","Level"],["경험치","EXP"],["울타리","Fence"],["나무","Wood"],["자동","Auto"],["생산","produce"],["성장","Growth"],["초","s"],["일차","Day"],["일","d"],["개",""],["칸","slots"],["행","row"],["열","col"],["보유","Owned"],["판매","Sell"],["구매","Buy"],["잠김","Locked"],["준비","ready"],["다음 날","Next Day"],["닫기","Close"],["뒤로","Back"],["상점","Shop"],["농장","Farm"],["가축장","Ranch"],["훈련소","Training"],["전투 포탈","Battle Portal"]
+];
+function enTerm(v){return EN_EXACT[v]||v;}
+function tr(v){
+  if(!S||S.lang!=="en"||v==null)return v;
+  let text=String(v);
+  if(EN_EXACT[text])return EN_EXACT[text];
+  text=text
+    .replace(/튜토리얼 (\d+)\/(\d+)/g,"Tutorial $1/$2")
+    .replace(/^완료 조건: (.+)$/g,(m,goal)=>`Complete By: ${enTerm(goal)}`)
+    .replace(/(\d+)일차 시작/g,"Day $1 Begins")
+    .replace(/오늘의 날씨: 맑음/g,"Today's Weather: Clear")
+    .replace(/오늘의 날씨: 가뭄/g,"Today's Weather: Drought")
+    .replace(/오늘의 날씨: 태풍/g,"Today's Weather: Typhoon")
+    .replace(/오늘의 날씨: 홍수/g,"Today's Weather: Flood")
+    .replace(/생활 지원금 \+(\d+)골드 획득/g,"Daily Support +$1 Gold")
+    .replace(/새로운 하루! 생활 지원금 \+(\d+)골드/g,"New day! Daily support +$1 Gold")
+    .replace(/골드가 부족해요\. 필요 골드: (\d+)/g,"Not enough Gold. Need $1 Gold.")
+    .replace(/업그레이드 진행 중 · 남은 시간 (\d+)초/g,"Upgrade in progress · $1s left")
+    .replace(/작업 중 (\d+)초/g,"Working $1s")
+    .replace(/남은 시간 (\d+)초/g,"$1s left")
+    .replace(/^훈련소 건설 시작!$/g,"Started building the Training Center!")
+    .replace(/^훈련소 업그레이드 시작!$/g,"Started upgrading the Training Center!")
+    .replace(/^훈련소 완성! 작물 훈련 추가 경험치 \+(\d+)%$/g,"Training Center complete! Crop Training Bonus EXP +$1%")
+    .replace(/^훈련소 업그레이드 완료! 작물 훈련 추가 경험치 \+(\d+)%$/g,"Training Center upgrade complete! Crop Training Bonus EXP +$1%")
+    .replace(/^(.+?) 완료!$/g,(m,name)=>`${enTerm(name)} complete!`)
+    .replace(/훈련소 (\d+)레벨은 캐릭터 레벨 (\d+)부터 가능해요\.?/g,"Training Center Lv.$1 requires Character Lv.$2.")
+    .replace(/훈련소 (\d+)Level은 캐릭터 Level (\d+)부터 가능해요\.?/g,"Training Center Lv.$1 requires Character Lv.$2.")
+    .replace(/훈련소 (\d+)레벨은 Character Level (\d+)부터 가능해요\.?/g,"Training Center Lv.$1 requires Character Lv.$2.")
+    .replace(/훈련소 (\d+)Level은 Character Level (\d+)부터 가능해요\.?/g,"Training Center Lv.$1 requires Character Lv.$2.")
+    .replace(/현재 효과: 작물 훈련 추가 경험치 \+(\d+)%/g,"Current Effect: Crop Training Bonus EXP +$1%")
+    .replace(/레벨업 효과: 작물 훈련 추가 경험치 \+(\d+)% -> \+(\d+)%/g,"Level-up Effect: Crop Training Bonus EXP +$1% -> +$2%")
+    .replace(/작물 훈련 추가 경험치 \+(\d+)%/g,"Crop Training Bonus EXP +$1%")
+    .replace(/선택한 밭: (\d+)행 (\d+)열 · 전체 씨앗 (\d+)/g,"Selected Field: row $1, col $2 · Total seeds $3")
+    .replace(/^(.+?) (\d+)개 수확!$/g,(m,name,amount)=>`Harvested ${amount} ${enTerm(name)}!`)
+    .replace(/^(.+?) 씨앗 3개 구매!$/g,(m,name)=>`Bought 3 ${enTerm(name)} seeds!`)
+    .replace(/^(.+?) 판매 완료\.$/g,(m,name)=>`Sold ${enTerm(name)}.`)
+    .replace(/^(.+?) 훈련 완료\. 경험치 \+(\d+)$/g,(m,name,amount)=>`${enTerm(name)} training complete. EXP +${amount}`)
+    .replace(/^(.+?) 심기$/g,(m,name)=>`Plant ${enTerm(name)}`)
+    .replace(/^(.+?)을 심었어요\.$/g,(m,name)=>`Planted ${enTerm(name)}.`)
+    .replace(/^(.+?) 선택$/g,(m,name)=>`Selected ${enTerm(name)}`)
+    .replace(/^(.+?)이 없어요\.$/g,(m,name)=>`No ${enTerm(name)} available.`)
+    .replace(/^(.+?) 부족\.$/g,(m,name)=>`Not enough ${enTerm(name)}.`)
+    .replace(/^(.+?) 생산물 수확 완료!$/g,(m,name)=>`${enTerm(name)} product collected!`)
+    .replace(/^(.+?) 생산 진행 (\d+)\/(\d+)일 · 수확 후 (\d+)일마다 생산돼요\.$/g,(m,name,elapsed,total,days)=>`${enTerm(name)} production ${elapsed}/${total} days · Produces every ${days} days after collection.`)
+    .replace(/^(.+?) 배치 완료\. (\d+)일 뒤 (.+?)을 얻어요\.$/g,(m,name,days,product)=>`${enTerm(name)} placed. Produces ${enTerm(product)} after ${days} days.`)
+    .replace(/(\d+)일마다 (우유|양털|달걀) 생산/g,(m,d,p)=>`Produces ${EN_EXACT[p]||p} every ${d} day${Number(d)===1?"":"s"}`)
+    .replace(/(\d+)\/(\d+)일/g,"$1/$2 days")
+    .replace(/보유 (\d+) · (\d+)골드/g,"Owned $1 · $2 Gold")
+    .replace(/작물 (\d+)칸 유실/g,"Crops lost from $1 plots")
+    .replace(/가축 (\d+)마리 유실/g,"Lost $1 livestock")
+    .replace(/가축 생산물 (\d+)개 준비/g,"$1 livestock products ready")
+    .replace(/가축 생산물 (\d+)개가 준비됐어요\./g,"$1 livestock products are ready.")
+    .replace(/나무 \+1/g,"Wood +1")
+    .replace(/(\d+)일차/g,"Day $1")
+    .replace(/(\d+)골드/g,"$1 Gold")
+    .replace(/레벨 (\d+)/g,"Level $1")
+    .replace(/공격 (\d+) · 체력 (\d+)/g,"ATK $1 · HP $2")
+    .replace(/캐릭터 Lv\.(\d+)/g,"Character Lv.$1")
+    .replace(/베리 \+(\d+)/g,"Berry +$1")
+    .replace(/사과 \+(\d+)/g,"Apple +$1")
+    .replace(/훈련소 (\d+)레벨은 캐릭터 레벨 (\d+)부터 가능해요\./g,"Training Center Lv.$1 requires Character Lv.$2.")
+    .replace(/훈련소 (\d+)Level은 캐릭터 Level (\d+)부터 가능해요\./g,"Training Center Lv.$1 requires Character Lv.$2.")
+    .replace(/훈련소 (\d+)레벨은 Character Level (\d+)부터 가능해요\./g,"Training Center Lv.$1 requires Character Lv.$2.")
+    .replace(/훈련소 (\d+)Level은 Character Level (\d+)부터 가능해요\./g,"Training Center Lv.$1 requires Character Lv.$2.")
+    .replace(/훈련소 Lv\.(\d+)/g,"Training Lv.$1")
+    .replace(/훈련소/g,"Training")
+    .replace(/전투 포탈/g,"Battle Portal")
+    .replace(/가축장/g,"Ranch")
+    .replace(/Lv\.(\d+) 업그레이드/g,"Upgrade to Lv.$1")
+    .replace(/(\d+)초/g,"$1s")
+    .replace(/(\d+)일 생산/g,"$1-day production")
+    .replace(/자동 (\d+)일 생산/g,"Auto $1-day production")
+    .replace(/보유 (\d+)/g,"Owned $1")
+    .replace(/성장 (\d+)초/g,"Growth $1s")
+    .replace(/경험치 \+(\d+)/g,"EXP +$1")
+    .replace(/\+(\d+)골드/g,"+$1 Gold")
+    .replace(/필요 골드: (\d+)/g,"Gold needed: $1")
+    .replace(/필요 (\d+) Gold/g,"Need $1 Gold")
+    .replace(/필요 (\d+)Gold/g,"Need $1 Gold")
+    .replace(/건설 비용 (\d+)골드/g,"Build cost $1 Gold")
+    .replace(/골드 ([0-9]+)/g,"Gold $1")
+    .replace(/씨앗 ([0-9]+)/g,"Seeds $1")
+    .replace(/작물 ([0-9]+)/g,"Crops $1")
+    .replace(/가축 ([0-9/]+)/g,"Livestock $1")
+    .replace(/(\d+)\. /g,"$1. ");
+  for(const [ko,en] of EN_PARTS)text=text.split(ko).join(en);
+  return text.replace(/\s+·\s+/g," · ").replace(/\s{2,}/g," ").trim();
+}
+function tx(v,x,y,sz,c,al="left",wt=800){v=tr(v);cx.font=`${wt} ${sz}px ${FT}`;cx.fillStyle=c;cx.textAlign=al;cx.textBaseline="middle";cx.fillText(v,x,y);}
+function fT(v,x,y,mw,sz,c,al="center",wt=800){v=tr(v);let f=sz;do{cx.font=`${wt} ${f}px ${FT}`;if(cx.measureText(v).width<=mw||f<=6)break;f--;}while(f>6);cx.fillStyle=c;cx.textAlign=al;cx.textBaseline="middle";cx.fillText(v,x,y);}
+function wrapT(v,x,y,mw,lh,sz,c,wt=760){
+  v=tr(v);
+  cx.font=`${wt} ${sz}px ${FT}`;cx.fillStyle=c;cx.textAlign="left";cx.textBaseline="middle";
+  const words=v.split(" "),lines=[];let line="";
+  for(const word of words){const next=line?`${line} ${word}`:word;if(cx.measureText(next).width<=mw||!line)line=next;else{lines.push(line);line=word;}}
+  if(line)lines.push(line);
+  lines.slice(0,3).forEach((line,i)=>fT(line,x,y+i*lh,mw,sz,c,"left",wt));
+}
+function zC(z){return{x:((z.c1+z.c2)/2)*TL+TL/2,y:((z.r1+z.r2)/2)*TL+TL/2,w:(z.c2-z.c1+1)*TL,h:(z.r2-z.r1+1)*TL};}
+function hoverRect(r){return S.mx>=r.x&&S.mx<=r.x+r.w&&S.my>=r.y&&S.my<=r.y+r.h;}
+function uiShadow(x,y,w,h,r,a=.18){cx.save();cx.shadowColor=`rgba(15,23,42,${a})`;cx.shadowBlur=22;cx.shadowOffsetY=10;fR(x,y,w,h,r,"rgba(0,0,0,.001)");cx.restore();}
+function vGrad(x,y,h,c1,c2){const g=cx.createLinearGradient(x,y,x,y+h);g.addColorStop(0,c1);g.addColorStop(1,c2);return g;}
+function uiPanel(x,y,w,h,r,stroke,titleColor){
+  uiShadow(x,y,w,h,r,.22);
+  fR(x,y,w,h,r,vGrad(x,y,h,"rgba(255,253,244,.985)","rgba(246,241,219,.965)"));
+  sR(x,y,w,h,r,"rgba(255,255,255,.85)",1.2);
+  sR(x+3,y+3,w-6,h-6,Math.max(4,r-3),stroke,2);
+  const shine=cx.createLinearGradient(x,y,x+w,y+h);shine.addColorStop(0,"rgba(255,255,255,.55)");shine.addColorStop(.42,"rgba(255,255,255,0)");shine.addColorStop(1,"rgba(255,255,255,.18)");
+  cx.save();rP(x+4,y+4,w-8,46,Math.max(4,r-4));cx.clip();cx.fillStyle=shine;cx.fillRect(x,y,w,h);cx.restore();
+  return titleColor;
+}
+function iconButton(x,y,w,h,label,fill,stroke,text,enabled=true){
+  const hot=hoverRect({x,y,w,h}),lift=hot&&enabled?-2:0;
+  uiShadow(x,y+lift,w,h,10,enabled?(hot?.2:.12):.06);
+  fR(x,y+lift,w,h,10,enabled?(hot?fill:"rgba(255,255,255,.72)"):"rgba(148,163,184,.18)");
+  sR(x,y+lift,w,h,10,enabled?(hot?stroke:stroke+"88"):"rgba(100,116,139,.35)",1.4);
+  fT(label,x+w/2,y+h/2+lift,w-16,12,enabled?text:"#94a3b8","center",900);
+}
+function languageActive(){return !S.lang;}
+function setLanguage(lang){
+  S.lang=lang==="en"?"en":"ko";
+  document.documentElement.lang=S.lang;
+  document.title=S.lang==="en"?"Farm Village":"농장 마을";
+  try{sessionStorage.setItem(FARM_SESSION_LANGUAGE_KEY,S.lang);}catch(e){}
+  S.mf=1;
+}
+function toggleLanguage(){
+  setLanguage(S.lang==="en"?"ko":"en");
+  S.act=S.lang==="en"?"Language: English":"언어: 한국어";
+  saveFarm();
+}
+function drawLanguageUI(){
+  if(!languageActive())return;
+  S._languageButtons=[];
+  cx.save();
+  cx.fillStyle="rgba(15,23,42,.58)";cx.fillRect(0,0,W,H);
+  const pw=560,ph=250,px=W/2-pw/2,py=H/2-ph/2;
+  uiPanel(px,py,pw,ph,22,"rgba(132,204,22,.9)");
+  fT("Choose Language / 언어 선택",W/2,py+48,pw-60,24,"#1f2937","center",950);
+  fT("Select your play language before the tutorial starts.",W/2,py+82,pw-80,12,"#475569","center",760);
+  const cards=[
+    {x:px+58,y:py+118,w:200,h:78,lang:"ko",title:"한국어",body:"튜토리얼과 게임 UI를 한국어로 표시"},
+    {x:px+302,y:py+118,w:200,h:78,lang:"en",title:"English",body:"Show tutorial and game UI in English"}
+  ];
+  for(const card of cards){
+    const hot=hoverRect(card),lift=hot?-3:0,accent=card.lang==="en"?"#3b82f6":"#84cc16";
+    uiShadow(card.x,card.y+lift,card.w,card.h,16,hot?.2:.12);
+    fR(card.x,card.y+lift,card.w,card.h,16,hot?"rgba(255,255,255,.98)":"rgba(255,253,244,.9)");
+    sR(card.x,card.y+lift,card.w,card.h,16,accent+"cc",hot?2.5:1.6);
+    fT(card.title,card.x+card.w/2,card.y+26+lift,card.w-34,18,accent,"center",950);
+    fT(card.body,card.x+card.w/2,card.y+55+lift,card.w-30,10,"#64748b","center",760);
+    S._languageButtons.push(card);
+  }
+  fT("언어는 현재 세션에 저장됩니다.",W/2,py+220,pw-80,10,"#64748b","center",760);
+  cx.restore();
+}
+const TUTORIAL_STEPS=[
+  {id:"plant",title:"씨앗 심기",body:"밭 근처로 이동한 뒤 빈 밭을 클릭하고, 씨앗 선택 화면에서 씨앗을 실제로 심어보세요.",goal:"씨앗 심기 액션 완료",focus:ZF,color:"#84cc16"},
+  {id:"harvest",title:"수확하기",body:"작물이 다 자라면 같은 밭을 클릭해서 직접 수확하세요. 성장 막대가 끝날 때까지 잠시 기다리면 됩니다.",goal:"성숙한 작물 클릭",focus:ZF,color:"#22c55e"},
+  {id:"buildTraining",title:"훈련소 짓기",body:"훈련소 공터로 이동해 클릭한 뒤 건설 메뉴에서 훈련소 건설을 시작하세요.",goal:"훈련소 건설 시작",focus:ZT,color:"#60a5fa"},
+  {id:"trainHero",title:"영웅 기르기",body:"훈련소가 완성되면 다시 클릭해 영웅 훈련 화면을 열고, 수확한 작물을 눌러 영웅 경험치를 올리세요.",goal:"영웅 훈련 1회 완료",focus:ZT,color:"#3b82f6"},
+  {id:"battle",title:"전투 입장",body:"전투 포탈로 이동해 클릭하면 실제 전투 화면으로 넘어갑니다.",goal:"전투 포탈 클릭",focus:ZH,color:"#818cf8"}
+];
+function tutorialActive(){return !!S.lang&&!S.tutorialDone;}
+function currentTutorial(){return TUTORIAL_STEPS[cl(S.tutorialStep,0,TUTORIAL_STEPS.length-1)];}
+function advanceTutorial(){
+  if(!tutorialActive())return;
+  if(S.tutorialStep<TUTORIAL_STEPS.length-1){S.tutorialStep++;S.mf=1;return;}
+  S.tutorialDone=true;S.mf=1;sM("튜토리얼 완료. 농장 운영을 시작하세요.");
+}
+function markTutorial(id){
+  if(!tutorialActive())return;
+  const step=currentTutorial();
+  if(step&&step.id===id)advanceTutorial();
+}
+function skipTutorial(){S.tutorialDone=true;S.mf=1;sM("튜토리얼을 건너뛰었어요. 언제든 구역 안내를 보며 진행할 수 있어요.");}
+function drawTutorialFocus(){
+  if(!tutorialActive())return;
+  const step=currentTutorial();if(!step.focus)return;
+  const z=step.focus,x=z.c1*TL,y=z.r1*TL,w=(z.c2-z.c1+1)*TL,h=(z.r2-z.r1+1)*TL;
+  cx.save();cx.globalAlpha=.75+.2*Math.sin(S.an*4);sR(x-8,y-8,w+16,h+16,18,step.color,3);cx.restore();
+}
+function drawTutorialUI(){
+  if(!tutorialActive())return;
+  const step=currentTutorial(),i=cl(S.tutorialStep,0,TUTORIAL_STEPS.length-1);
+  S._tutorialButtons=[];
+  cx.save();
+  const pw=350,ph=160,px=18,py=H-202;
+  uiPanel(px,py,pw,ph,18,step.color+"cc");
+  fT(`현재 단계 ${i+1}/${TUTORIAL_STEPS.length}`,px+22,py+24,130,10,step.color,"left",950);
+  fT(step.title,px+22,py+50,pw-44,19,"#1f2937","left",950);
+  wrapT(step.body,px+22,py+78,pw-44,18,11,"#475569",760);
+  fR(px+22,py+ph-45,pw-148,24,10,"rgba(15,23,42,.06)");
+  fT(`완료 조건: ${step.goal}`,px+32,py+ph-33,pw-166,9,"#334155","left",850);
+  const skip={x:px+pw-112,y:py+ph-48,w:90,h:30};
+  iconButton(skip.x,skip.y,skip.w,skip.h,"건너뛰기","rgba(241,245,249,.95)","rgba(100,116,139,.45)","#475569",true);
+  S._tutorialButtons.push({...skip,kind:"skip"});
+  cx.restore();
+}
+function glowRing(x,y,rx,ry,color,phase=0){
+  cx.save();cx.globalAlpha=.36+.12*Math.sin(S.an*3+phase);cx.strokeStyle=color;cx.lineWidth=2;cx.beginPath();cx.ellipse(x,y,rx,ry,0,0,Math.PI*2);cx.stroke();cx.globalAlpha=.12;cx.lineWidth=7;cx.stroke();cx.restore();
+}
+function sparkle(x,y,color,phase=0,scale=1){
+  const a=.45+.35*Math.sin(S.an*4+phase),r=(3+Math.sin(S.an*3+phase))*scale;
+  cx.save();cx.globalAlpha=a;cx.strokeStyle=color;cx.lineWidth=1.4;cx.beginPath();cx.moveTo(x-r,y);cx.lineTo(x+r,y);cx.moveTo(x,y-r);cx.lineTo(x,y+r);cx.stroke();cx.restore();
+}
+function dCover(k,x,y,w,h,a=1){
+  if(!iO(k))return false;
+  const img=A[k],ir=img.naturalWidth/img.naturalHeight,rr=w/h;
+  let sw=img.naturalWidth,sh=img.naturalHeight,sx=0,sy=0;
+  if(ir>rr){sw=img.naturalHeight*rr;sx=(img.naturalWidth-sw)/2;}
+  else{sh=img.naturalWidth/rr;sy=(img.naturalHeight-sh)/2;}
+  cx.save();cx.globalAlpha=a;cx.drawImage(img,sx,sy,sw,sh,x,y,w,h);cx.restore();
+  return true;
+}
+function drawScreenBackdrop(k,tint="rgba(15,23,42,.34)"){
+  if(!dCover(k,0,0,W,H,1)){
+    cx.fillStyle="rgba(15,23,42,.55)";cx.fillRect(0,0,W,H);return;
+  }
+  cx.save();
+  cx.fillStyle=tint;cx.fillRect(0,0,W,H);
+  const g=cx.createRadialGradient(W*.5,H*.42,90,W*.5,H*.42,W*.72);
+  g.addColorStop(0,"rgba(255,255,255,.1)");
+  g.addColorStop(.58,"rgba(255,255,255,0)");
+  g.addColorStop(1,"rgba(2,6,23,.36)");
+  cx.fillStyle=g;cx.fillRect(0,0,W,H);
+  cx.globalCompositeOperation="screen";
+  for(let i=0;i<18;i++)sparkle((i*73+S.an*18)%W,88+((i*47)%(H-160)),"#fff7ad",i,.75);
+  cx.restore();
+}
+function drawHomeBackdrop(){
+  if(!dCover("homeStart",0,0,W,H,1))return false;
+  cx.save();
+  const haze=cx.createLinearGradient(0,0,0,H);
+  haze.addColorStop(0,"rgba(255,248,209,.16)");
+  haze.addColorStop(.42,"rgba(255,255,255,.02)");
+  haze.addColorStop(1,"rgba(35,55,31,.18)");
+  cx.fillStyle=haze;cx.fillRect(0,0,W,H);
+  const vignette=cx.createRadialGradient(W*.5,H*.52,80,W*.5,H*.52,W*.72);
+  vignette.addColorStop(0,"rgba(255,255,255,0)");
+  vignette.addColorStop(.72,"rgba(255,255,255,0)");
+  vignette.addColorStop(1,"rgba(15,23,42,.28)");
+  cx.fillStyle=vignette;cx.fillRect(0,0,W,H);
+  cx.restore();
+  return true;
+}
+function drawHomeAtmosphere(){
+  cx.save();
+  cx.globalCompositeOperation="screen";
+  for(let i=0;i<5;i++){
+    const x=60+i*120+Math.sin(S.an*.25+i)*18;
+    const g=cx.createLinearGradient(x-70,0,x+180,H*.55);
+    g.addColorStop(0,"rgba(255,245,180,.18)");
+    g.addColorStop(.7,"rgba(255,245,180,0)");
+    cx.fillStyle=g;cx.beginPath();cx.moveTo(x,0);cx.lineTo(x+120,H*.62);cx.lineTo(x+210,H*.62);cx.lineTo(x+70,0);cx.closePath();cx.fill();
+  }
+  for(let i=0;i<22;i++){
+    const x=(i*83+S.an*12)%W,y=72+((i*47+Math.sin(S.an+i)*22)%(H-110));
+    cx.globalAlpha=.14+.08*Math.sin(S.an*2+i);
+    cx.fillStyle=i%3?"#fff7ad":"#bfdbfe";
+    cx.beginPath();cx.arc(x,y,1.2+(i%4)*.35,0,Math.PI*2);cx.fill();
+  }
+  cx.restore();
+}
+function isRoadCell(r,c){return r>=0&&r<RO&&c>=0&&c<CO&&grid[r][c]===T.ROAD;}
+function roadEdgeMask(r,c){
+  return {
+    n:!isRoadCell(r-1,c),
+    s:!isRoadCell(r+1,c),
+    w:!isRoadCell(r,c-1),
+    e:!isRoadCell(r,c+1)
+  };
+}
+function drawPavedRoadTile(x,y,r,c,alpha=1){
+  const edge=roadEdgeMask(r,c);
+  cx.save();
+  cx.globalAlpha=alpha;
+  const g=cx.createLinearGradient(x,y,x,y+TL);
+  g.addColorStop(0,"rgba(202,205,164,.62)");
+  g.addColorStop(.56,"rgba(153,166,118,.66)");
+  g.addColorStop(1,"rgba(113,132,86,.62)");
+  cx.fillStyle=g;
+  cx.fillRect(x,y,TL,TL);
+  cx.fillStyle="rgba(255,249,205,.1)";
+  if((r+c)%2===0){cx.beginPath();cx.ellipse(x+TL*.52,y+TL*.44,TL*.24,1.4,.08,0,Math.PI*2);cx.fill();}
+  cx.fillStyle="rgba(38,67,32,.18)";
+  if(edge.n)cx.fillRect(x,y,TL,3);
+  if(edge.s)cx.fillRect(x,y+TL-3,TL,3);
+  if(edge.w)cx.fillRect(x,y,3,TL);
+  if(edge.e)cx.fillRect(x+TL-3,y,3,TL);
+  cx.fillStyle="rgba(236,252,203,.12)";
+  if(!edge.n)cx.fillRect(x+9,y+1,TL-18,1);
+  if(!edge.s)cx.fillRect(x+9,y+TL-2,TL-18,1);
+  if(!edge.w)cx.fillRect(x+1,y+9,1,TL-18);
+  if(!edge.e)cx.fillRect(x+TL-2,y+9,1,TL-18);
+  cx.restore();
+}
+function drawRoadNetwork(){
+  cx.save();
+  cx.globalAlpha=.84;
+  for(let r=0;r<RO;r++)for(let c=0;c<CO;c++){
+    if(!isRoadCell(r,c))continue;
+    drawPavedRoadTile(c*TL,r*TL,r,c,1);
+  }
+  cx.globalCompositeOperation="multiply";
+  cx.fillStyle="rgba(38,67,32,.1)";
+  for(let r=0;r<RO;r++)for(let c=0;c<CO;c++){
+    if(!isRoadCell(r,c))continue;
+    const x=c*TL,y=r*TL,edge=roadEdgeMask(r,c);
+    if(edge.n){cx.beginPath();cx.ellipse(x+TL/2,y+3,TL*.48,5,0,0,Math.PI*2);cx.fill();}
+    if(edge.s){cx.beginPath();cx.ellipse(x+TL/2,y+TL-3,TL*.48,5,0,0,Math.PI*2);cx.fill();}
+    if(edge.w){cx.beginPath();cx.ellipse(x+3,y+TL/2,5,TL*.48,0,0,Math.PI*2);cx.fill();}
+    if(edge.e){cx.beginPath();cx.ellipse(x+TL-3,y+TL/2,5,TL*.48,0,0,Math.PI*2);cx.fill();}
+  }
+  cx.restore();
+}
+function drawGameplayGroundHints(){
+  cx.save();
+  drawRoadNetwork();
+  cx.globalAlpha=.15;
+  const washes=[
+    [ZF,"#84cc16"],[ZR,"#d97706"],[ZT,"#60a5fa"],[ZH,"#818cf8"],[ZS,"#f97316"]
+  ];
+  for(const[z,c]of washes){
+    const x=z.c1*TL,y=z.r1*TL,w=(z.c2-z.c1+1)*TL,h=(z.r2-z.r1+1)*TL;
+    fR(x,y,w,h,16,c);sR(x+2,y+2,w-4,h-4,14,"rgba(255,255,255,.52)",1.2);
+  }
+  cx.restore();
+}
+function zonePrompt(z,text,color){
+  const p=zC(z),near=S.nz===z,y=z.r1*TL-14+(near?Math.sin(S.an*5)*1.2:0);
+  const bw=z===ZR?150:124;
+  cx.save();cx.globalAlpha=near?.96:.78;uiShadow(p.x-bw/2,y-12,bw,24,12,.1);fR(p.x-bw/2,y-12,bw,24,12,"rgba(255,253,244,.93)");sR(p.x-bw/2,y-12,bw,24,12,near?color:"rgba(61,42,18,.18)",near?2:1);fT(text,p.x,y,bw-20,11,near?"#1f2937":"#3d2a12","center",900);cx.restore();
+}
+const ZINFO=new Map([
+  [ZT,{name:"훈련소",tag:"작물 훈련 추가 경험치 +0%",accent:"#60a5fa",body:"작물로 영웅 레벨업",cta:"Space / 클릭으로 훈련"}],
+  [ZH,{name:"전투 포탈",tag:"스테이지 입장",accent:"#818cf8",body:"전투 맵으로 이동해 몬스터와 전투",cta:"가까이서 클릭해 입장"}],
+  [ZS,{name:"상점",tag:"씨앗, 가축 구매",accent:"#f97316",body:"작물과 생산물 판매",cta:"클릭으로 카테고리 선택"}],
+  [ZF,{name:"농장",tag:"상점에서 구입한 씨앗 심기",accent:"#84cc16",body:"성장한 작물 수확",cta:"밭 클릭으로 상호작용"}],
+  [ZR,{name:"가축장",tag:"상점에서 구입한 가축 배치",accent:"#d97706",body:"가축이 일정 날짜마다 생산물 생산",cta:"준비된 생산물을 클릭해 회수"}]
+]);
+function zoneInfo(z){
+  if(z===ZT){
+    const level=trainingLevel(),job=trainingJob();
+    if(job)return {name:"훈련소",tag:`Lv.${job.target} 준비 중`,accent:"#60a5fa",body:`남은 시간 ${Math.ceil(job.remaining)}초`,cta:"클릭으로 진행 상태 확인"};
+    if(level<=0)return {name:"훈련소 공터",tag:"건설 가능",accent:"#60a5fa",body:`건설 비용 ${trainingUpgradeCost(1)}골드`,cta:"클릭으로 훈련소 건설"};
+    return {name:"훈련소",tag:`작물 훈련 추가 경험치 +${trainingBonusPercent()}%`,accent:"#60a5fa",body:"작물로 영웅 레벨업",cta:"클릭으로 훈련"};
+  }
+  if(z===ZH&&!trainingReady())return {name:"잠긴 전투 포탈",tag:"훈련소 필요",accent:"#94a3b8",body:"훈련소를 지어야 사용할 수 있음",cta:"클릭하면 안내 표시"};
+  if(z===ZR)return {...ZINFO.get(z),name:`가축장 (${occupiedRanchCount()}/${RANCH_CAPACITY})`};
+  return ZINFO.get(z);
+}
+function drawZoneInspector(){
+  const z=S.nz;if(!z||S.ss||S.trainUI||S.seedUI||S.sm||S.showInv)return;
+  const info=zoneInfo(z);if(!info)return;
+  const x=W-312,y=H-142,w=292,h=104;
+  uiShadow(x,y,w,h,18,.2);fR(x,y,w,h,18,"rgba(17,24,39,.84)");sR(x,y,w,h,18,info.accent+"bb",1.9);
+  fR(x+18,y+14,60,60,18,info.accent+"22");sR(x+18,y+14,60,60,18,info.accent+"88",1.35);
+  sparkle(x+48,y+44,"#fff7ed",0,.9);
+  fT(info.name,x+98,y+26,166,18,"#fff7ed","left",950);
+  fT(info.tag,x+98,y+51,168,11,"#d1d5db","left",820);
+  fT(info.body,x+98,y+67,168,11,"#d1d5db","left",820);
+  fR(x+18,y+82,w-36,18,9,"rgba(255,255,255,.09)");fT(info.cta,x+w/2,y+91,w-50,10,"#fef3c7","center",830);
+}
+function drawActionStrip(){
+  const w=260,h=30,x=W/2-w/2,y=50;
+  cx.save();cx.globalAlpha=.88;uiShadow(x,y,w,h,15,.12);fR(x,y,w,h,15,"rgba(15,23,42,.72)");sR(x,y,w,h,15,"rgba(255,255,255,.12)",1);fT(S.act,x+w/2,y+h/2,w-30,10,"#fff8dd","center",820);cx.restore();
+}
+
+/* === DRAW MAP === */
+function drawMap(){
+  const richHome=iO("homeStart");
+  if(!drawHomeBackdrop()){
+    const sky=cx.createLinearGradient(0,0,0,72);sky.addColorStop(0,"#8bdcff");sky.addColorStop(1,"#b8ee88");
+    cx.fillStyle=sky;cx.fillRect(0,0,W,72);
+    const sun=cx.createRadialGradient(70,28,3,70,28,48);sun.addColorStop(0,"rgba(255,255,226,.85)");sun.addColorStop(.4,"rgba(252,211,77,.3)");sun.addColorStop(1,"rgba(252,211,77,0)");
+    cx.fillStyle=sun;cx.beginPath();cx.arc(70,28,50,0,Math.PI*2);cx.fill();
+    for(const[x,y,s]of[[130,22,.55],[380,18,.5],[620,26,.6],[900,20,.5]]){cx.fillStyle="rgba(255,255,255,.6)";cx.beginPath();cx.ellipse(x,y,26*s,9*s,0,0,Math.PI*2);cx.ellipse(x+22*s,y-6*s,22*s,11*s,0,0,Math.PI*2);cx.ellipse(x+44*s,y,26*s,9*s,0,0,Math.PI*2);cx.fill();}
+    cx.fillStyle="#6ab04c";cx.fillRect(0,36,W,H-36);
+  }
+
+  if(richHome){
+    // Keep the real tile grid for movement, but do not paint translucent guide tiles over the background art.
+  }else{
+    for(let r=0;r<RO;r++)for(let c=0;c<CO;c++){
+      const t=grid[r][c],x=c*TL,y=r*TL;
+      if(t===T.ROAD)dRoad(x,y,r,c);
+      else if(t===T.FARM)dFarm(x,y,r,c);
+      else if(t===T.RANCH)dRanch(x,y,r,c);
+      else if(t===T.TRAINING)dTrain(x,y,r,c);
+      else if(t===T.HOME)dHome(x,y,r,c);
+      else if(t===T.SHOP)dShop(x,y,r,c);
+      else if(t===T.WATER)dWater(x,y);
+      else dGrass(x,y,r,c);
+    }
+  }
+  drawHomeAtmosphere();
+  drawZL();drawCrops();drawRA();drawBld();
+}
+
+function dGrass(x,y,r,c){cx.fillStyle=(r+c)%2===0?"#6ab04c":"#5fa843";cx.fillRect(x,y,TL,TL);
+  if((r*7+c*13)%9===0){cx.strokeStyle="#4d9639";cx.lineWidth=1;cx.lineCap="round";cx.beginPath();cx.moveTo(x+14,y+28);cx.lineTo(x+16,y+16);cx.moveTo(x+20,y+28);cx.lineTo(x+22,y+15);cx.stroke();}}
+function dRoad(x,y,r,c){drawPavedRoadTile(x,y,r,c,1);}
+function dFarm(x,y,r,c){
+  const isC=crops.some(s=>s.gr===r&&s.gc===c);
+  cx.fillStyle=isC?((r+c)%2===0?"#8B6914":"#7d5f12"):((r+c)%2===0?"#7a5c10":"#6e520e");
+  cx.fillRect(x,y,TL,TL);
+  if(isC&&iO("soil"))cx.drawImage(A.soil,x,y,TL,TL);
+  else if(isC){cx.strokeStyle="rgba(255,229,177,.15)";cx.lineWidth=.7;cx.beginPath();cx.moveTo(x+5,y+18);cx.lineTo(x+31,y+18);cx.stroke();}
+}
+function dRanch(x,y,r,c){cx.fillStyle=(r+c)%2===0?"#c9a85c":"#bfa054";cx.fillRect(x,y,TL,TL);
+  for(const s of ranch)if(r>=s.r1&&r<=s.r2&&c>=s.c1&&c<=s.c2){cx.strokeStyle="rgba(139,115,85,.3)";cx.lineWidth=1;cx.strokeRect(x+2,y+2,TL-4,TL-4);}}
+function dTrain(x,y,r,c){
+  cx.fillStyle=(r+c)%2===0?"#82939a":"#74868d";cx.fillRect(x,y,TL,TL);
+  cx.fillStyle="rgba(255,255,255,.07)";cx.fillRect(x+2,y+2,TL-4,2);
+  if((r+c)%3===0){cx.strokeStyle="rgba(30,58,138,.24)";cx.lineWidth=1;cx.beginPath();cx.moveTo(x+8,y+28);cx.lineTo(x+28,y+8);cx.stroke();}
+}
+function dHome(x,y,r,c){
+  const hot=S.nz===ZH;cx.fillStyle=(r+c)%2===0?"#e9c875":"#dfbc69";cx.fillRect(x,y,TL,TL);
+  cx.fillStyle=hot?"rgba(99,102,241,.12)":"rgba(99,102,241,.06)";cx.beginPath();cx.arc(x+18,y+18,10+Math.sin(S.an*2+r+c)*2,0,Math.PI*2);cx.fill();
+}
+function dShop(x,y,r,c){
+  cx.fillStyle=(r+c)%2===0?"#df8156":"#d27149";cx.fillRect(x,y,TL,TL);
+  cx.fillStyle="rgba(255,248,221,.18)";if((r+c)%2===0)cx.fillRect(x+4,y+4,TL-8,4);
+}
+function dWater(x,y){cx.fillStyle="#5dade2";cx.fillRect(x,y,TL,TL);cx.fillStyle="rgba(255,255,255,.14)";cx.beginPath();cx.ellipse(x+18,y+18+Math.sin(S.an*2)*2,12,4,0,0,Math.PI*2);cx.fill();}
+
+/* === ZONE LABELS === */
+function drawZL(){
+  for(const z of ZONES){
+    const cx2=((z.c1+z.c2)/2)*TL+TL/2,cy=z.r1*TL-6;
+    const x1=z.c1*TL,y1=z.r1*TL,w=(z.c2-z.c1+1)*TL,h=(z.r2-z.r1+1)*TL;
+    const near=S.nz===z;cx.save();cx.globalAlpha=near?.8:.22;
+    sR(x1-2,y1-2,w+4,h+4,8,near?"#fde047":"#fff8dd",near?3:1.2);
+    if(near){cx.globalAlpha=.14+.04*Math.sin(S.an*5);fR(x1,y1,w,h,6,"#fef3c7");}
+    cx.restore();
+    const info=zoneInfo(z);
+    zonePrompt(z,info?info.name:z.label,near?"#facc15":"rgba(61,42,18,.2)");
+  }
+}
+
+/* === CROPS === */
+function drawCrops(){
+  for(const s of crops){
+    const x=s.gc*TL+TL/2,y=s.gr*TL+TL/2,sc=1+s.pulse*.1;
+    cx.save();cx.translate(x,y);cx.scale(sc,sc);
+    if(s.state==="empty"){cx.fillStyle="rgba(255,229,177,.25)";cx.beginPath();cx.ellipse(0,5,6,3,0,0,Math.PI*2);cx.fill();}
+    else{
+      const sw=Math.sin((s.sway+S.an)*2.2)*1.2;let dr=false;
+      if(s.state==="planted"||s.state==="watered"||s.state==="growing"){
+        const crop=cropDef(s.crop);
+        dr=crop&&dI(crop.cropIcon,sw,0,30,30,.5,.8);
+        if(!dr){cx.strokeStyle="#246f31";cx.lineWidth=2;cx.lineCap="round";cx.beginPath();cx.moveTo(sw*.3,6);cx.lineTo(sw,-7);cx.stroke();cx.fillStyle="#4fbd43";cx.beginPath();cx.ellipse(sw-3,-5,4,2.5,-.6,0,Math.PI*2);cx.ellipse(sw+3,-6,4,2.5,.6,0,Math.PI*2);cx.fill();}
+        const prog=cl(s.growTimer/(crop?crop.grow:10),0,1);fR(-9,14,18,3,1.5,"rgba(0,0,0,.3)");fR(-9,14,18*prog,3,1.5,"#4ade80");
+      }else if(s.state==="mature"){
+        const crop=cropDef(s.crop);
+        dr=crop&&dI(crop.cropIcon,sw,-2,34,34,.5,.8);
+        if(!dr){cx.strokeStyle="#246f31";cx.lineWidth=2;cx.lineCap="round";cx.beginPath();cx.moveTo(sw*.3,6);cx.lineTo(sw,-10);cx.stroke();cx.fillStyle="#4fbd43";cx.beginPath();cx.ellipse(sw-3,-8,4.5,2.5,-.6,0,Math.PI*2);cx.ellipse(sw+3,-9,4.5,2.5,.6,0,Math.PI*2);cx.fill();cx.fillStyle="#fb923c";cx.beginPath();cx.arc(sw,-12,4,0,Math.PI*2);cx.fill();}
+        cx.save();cx.globalAlpha=.3+Math.sin(S.an*5+s.sway)*.1;cx.strokeStyle="#fff7a8";cx.lineWidth=1.5;cx.beginPath();cx.ellipse(0,3,12,5,0,0,Math.PI*2);cx.stroke();cx.restore();
+      }
+    }
+    cx.restore();
+  }
+}
+
+/* === RANCH ANIMALS === */
+function drawRA(){
+  for(const s of ranch){
+    const col=s.idx%2,row=Math.floor(s.idx/2);
+    const cx2=ZR.c1*TL+(ZR.c2-ZR.c1+1)*TL*(col?.67:.33);
+    const cy=ZR.r1*TL+(ZR.r2-ZR.r1+1)*TL*(row?.67:.33);
+    if(!s.animal){cx.save();cx.globalAlpha=.35;fT("빈칸",cx2,cy,44,9,"#8B6914","center",700);cx.restore();continue;}
+    const a=s.animal,d=animalDef(a.type),bob=Math.sin(S.an*1.5+s.idx)*2,ax=cx2-8+Math.sin(S.an*.8+s.idx)*5,ay=cy-6+bob;
+    if(a.type==="cow"){if(!dI("cow",ax,ay,56,42,.5,.62))dCowFB(ax,ay,.4);}
+    else if(a.type==="sheep"){if(!dI("sheep",ax,ay,48,36,.5,.62))dSheepFB(ax,ay,.35);}
+    else if(a.type==="chicken"){if(!dI("chicken",ax,ay,38,32,.5,.62))dChickFB(ax,ay,.3);}
+    if(a.product){cx.save();cx.globalAlpha=.8+Math.sin(S.an*4)*.2;fR(cx2+16,cy-24,18,18,9,"rgba(255,253,244,.95)");tx("!",cx2+25,cy-15,11,"#dc2626","center",900);cx.restore();}
+    else{fR(cx2+6,cy-23,34,15,7,"rgba(217,249,157,.88)");fT("성장중",cx2+23,cy-16,30,7,"#166534","center",900);}
+    normalizeAnimalTimer(a,d);
+    const prog=cl((a.elapsed||0)/animalRequiredSeconds(d),0,1);
+    fR(cx2-28,cy+18,56,5,3,"rgba(68,64,60,.25)");fR(cx2-28,cy+18,56*prog,5,3,d.color);
+    fT(`${animalElapsedDays(a)}/${d.days}일`,cx2,cy+29,38,8,"#4b5563","center",800);
+  }
+}
+function dCowFB(x,y,s){cx.save();cx.translate(x,y);cx.scale(s,s);cx.fillStyle="rgba(0,0,0,.1)";cx.beginPath();cx.ellipse(0,24,24,5,0,0,Math.PI*2);cx.fill();cx.fillStyle="#fffdf4";cx.beginPath();cx.ellipse(-2,0,22,13,0,0,Math.PI*2);cx.fill();cx.fillStyle="#334155";cx.beginPath();cx.ellipse(-9,-2,6,4,-.5,0,Math.PI*2);cx.ellipse(5,3,7,4,.4,0,Math.PI*2);cx.fill();cx.fillStyle="#fffdf4";cx.beginPath();cx.arc(20,-4,9,0,Math.PI*2);cx.fill();cx.fillStyle="#111827";cx.beginPath();cx.arc(24,-6,1.8,0,Math.PI*2);cx.fill();cx.fillStyle="#f9a8d4";cx.beginPath();cx.ellipse(28,0,5,3,0,0,Math.PI*2);cx.fill();cx.restore();}
+function dSheepFB(x,y,s){cx.save();cx.translate(x,y);cx.scale(s,s);for(const[dx,dy,r]of[[-12,0,11],[-3,-4,13],[8,0,12]]){cx.fillStyle="#f8fafc";cx.beginPath();cx.arc(dx,dy,r,0,Math.PI*2);cx.fill();}cx.fillStyle="#fee2b3";cx.beginPath();cx.arc(18,-2,8,0,Math.PI*2);cx.fill();cx.fillStyle="#111827";cx.beginPath();cx.arc(21,-4,1.8,0,Math.PI*2);cx.fill();cx.restore();}
+function dChickFB(x,y,s){cx.save();cx.translate(x,y);cx.scale(s,s);cx.fillStyle="#fff7ed";cx.beginPath();cx.ellipse(0,0,14,10,-.1,0,Math.PI*2);cx.fill();cx.fillStyle="#fee2b3";cx.beginPath();cx.arc(12,-4,7,0,Math.PI*2);cx.fill();cx.fillStyle="#ef4444";cx.beginPath();cx.arc(10,-11,2.5,0,Math.PI*2);cx.arc(14,-11,2.5,0,Math.PI*2);cx.fill();cx.fillStyle="#f97316";cx.beginPath();cx.moveTo(18,-4);cx.lineTo(26,-1);cx.lineTo(18,2);cx.fill();cx.restore();}
+
+/* === BUILDINGS (with assets) === */
+function drawBld(){
+  // === BATTLE PORTAL (uses portal.png) ===
+  let hx=((ZH.c1+ZH.c2)/2)*TL+TL/2,hy=((ZH.r1+ZH.r2)/2)*TL+TL/2;
+  const portalNear=S.nz===ZH,portalPulse=.5+.5*Math.sin(S.an*3.4),portalUnlocked=trainingReady();
+  cx.save();
+  cx.globalAlpha=portalUnlocked?(.22+(portalNear?.18:.06)):.14;
+  const pg=cx.createRadialGradient(hx,hy+26,8,hx,hy+26,92);
+  pg.addColorStop(0,portalUnlocked?"rgba(129,140,248,.48)":"rgba(148,163,184,.42)");pg.addColorStop(.55,portalUnlocked?"rgba(99,102,241,.2)":"rgba(100,116,139,.18)");pg.addColorStop(1,"rgba(99,102,241,0)");
+  cx.fillStyle=pg;cx.beginPath();cx.ellipse(hx,hy+42,86,30,0,0,Math.PI*2);cx.fill();
+  cx.restore();
+  cx.save();if(!portalUnlocked)cx.filter="grayscale(1)";
+  const portalDrawn=dILive("battlePortal",hx,hy,112,112,.5,.5,portalUnlocked?1:.45,0,1.15);
+  cx.restore();
+  if(!portalDrawn){
+    // Simple fallback if image not loaded
+    cx.save();cx.translate(hx,hy);if(!portalUnlocked)cx.globalAlpha=.5;
+    const t=S.an;
+    const g=cx.createRadialGradient(0,0,8,0,0,50);
+    g.addColorStop(0,portalUnlocked?"#312e81":"#64748b");g.addColorStop(.6,portalUnlocked?"#3730a3":"#475569");g.addColorStop(1,portalUnlocked?"#1e1b4b":"#334155");
+    cx.fillStyle=g;cx.beginPath();cx.ellipse(0,0,48,66,0,0,Math.PI*2);cx.fill();
+    cx.strokeStyle="#6366f1";cx.lineWidth=4;cx.beginPath();cx.ellipse(0,0,50,68,0,0,Math.PI*2);cx.stroke();
+    cx.fillStyle="rgba(224,231,255,.6)";cx.beginPath();cx.arc(0,0,6,0,Math.PI*2);cx.fill();
+    fT("V",0,0,20,16,"#e0e7ff","center",900);
+    cx.restore();
+  }
+  for(let i=0;i<3;i++)glowRing(hx,hy+6,42+i*14+portalPulse*4,58+i*8,portalUnlocked?"rgba(199,210,254,.75)":"rgba(203,213,225,.45)",i);
+  if(portalUnlocked){
+    for(let i=0;i<7;i++){const a=S.an*(.9+i*.08)+i*1.7,rr=34+i*6;sparkle(hx+Math.cos(a)*rr,hy-26+Math.sin(a*1.3)*42,"#e0e7ff",i,.75);}
+    cx.save();cx.globalCompositeOperation="screen";for(let i=0;i<5;i++){const y=hy-46+i*22+Math.sin(S.an*1.7+i)*5;cx.strokeStyle=`rgba(165,180,252,${.1+i*.025})`;cx.lineWidth=2;cx.beginPath();cx.moveTo(hx-40-Math.sin(S.an+i)*10,y);cx.bezierCurveTo(hx-16,y-10,hx+16,y+10,hx+42+Math.cos(S.an+i)*8,y);cx.stroke();}cx.restore();
+  }else{
+    fR(hx-18,hy-72,36,24,8,"rgba(51,65,85,.88)");fT("잠김",hx,hy-60,28,9,"#e2e8f0","center",900);
+  }
+  if(portalNear){fR(hx-68,hy+78,136,26,13,portalUnlocked?"rgba(30,27,75,.82)":"rgba(51,65,85,.86)");sR(hx-68,hy+78,136,26,13,portalUnlocked?"rgba(199,210,254,.75)":"rgba(203,213,225,.58)",1.5);fT(portalUnlocked?"클릭: 전투 입장":"훈련소 건설 필요",hx,hy+91,116,11,"#eef2ff","center",900);}
+
+  // Market
+  let sx=((ZS.c1+ZS.c2)/2)*TL+TL/2,sy=((ZS.r1+ZS.r2)/2)*TL+TL/2;
+  const shopNear=S.nz===ZS;
+  if(!dILive("market",sx,sy,140,120,.5,.5,1,1.4,.72)){cx.save();cx.translate(sx,sy);for(let i=0;i<5;i++){cx.fillStyle=i%2?"#fff7ed":"#dc2626";fR(-30+i*12,-22,12,16,3,cx.fillStyle);}fR(-28,-6,56,32,4,"#fff0b8");cx.restore();}
+  if(shopNear){fR(sx-54,sy+66,108,24,12,"rgba(124,45,18,.84)");fT("클릭: 상점 열기",sx,sy+78,92,10,"#fff7ed","center",900);}
+  // Training
+  let tx2=((ZT.c1+ZT.c2)/2)*TL+TL/2,ty=((ZT.r1+ZT.r2)/2)*TL+TL/2;
+  const trainNear=S.nz===ZT,trainLevel=trainingLevel(),trainBuild=trainingJob();
+  if(trainLevel<=0){
+  }else{
+    if(!dILive("workshop",tx2,ty,130,110,.5,.5,1,2.4,.78)){cx.save();cx.translate(tx2,ty-6);cx.strokeStyle="#7c3f12";cx.lineWidth=5;cx.lineCap="round";cx.beginPath();cx.moveTo(0,-18);cx.lineTo(0,24);cx.moveTo(-22,0);cx.lineTo(22,0);cx.stroke();cx.fillStyle="#d4a76a";cx.beginPath();cx.arc(0,-26,12,0,Math.PI*2);cx.fill();cx.restore();}
+    cx.save();cx.translate(tx2,ty-16);cx.rotate(Math.sin(S.an*2)*.04);cx.strokeStyle=trainNear?"#dbeafe":"rgba(219,234,254,.7)";cx.lineWidth=2;cx.lineCap="round";cx.beginPath();cx.moveTo(-46,-22);cx.lineTo(-18,-44);cx.moveTo(44,-22);cx.lineTo(18,-44);cx.stroke();cx.restore();
+    for(let i=0;i<6;i++)sparkle(tx2-50+i*20,ty-54+Math.sin(S.an*4+i)*6,i%2?"#bfdbfe":"#fef3c7",i,.55);
+    for(let i=0;i<3;i++){const yy=ty+28+i*10;cx.save();cx.globalAlpha=.42;cx.strokeStyle=i%2?"#fef3c7":"#bfdbfe";cx.lineWidth=1.4;cx.beginPath();cx.moveTo(tx2-58,yy);cx.lineTo(tx2-36,yy-8);cx.lineTo(tx2-18,yy);cx.stroke();cx.restore();}
+    fR(tx2-38,ty-66,76,18,9,"rgba(30,58,138,.82)");fT(`Lv.${trainLevel}`,tx2,ty-57,54,10,"#eff6ff","center",900);
+  }
+  if(trainBuild){
+    const prog=cl(1-trainBuild.remaining/trainBuild.total,0,1);
+    fR(tx2-56,ty+44,112,8,4,"rgba(15,23,42,.2)");fR(tx2-56,ty+44,112*prog,8,4,"#60a5fa");
+  }
+  if(trainNear){const label=trainBuild?`작업 중 ${Math.ceil(trainBuild.remaining)}초`:trainLevel<=0?"클릭: 훈련소 건설":"클릭: 영웅 훈련";fR(tx2-68,ty+58,136,24,12,"rgba(30,58,138,.86)");fT(label,tx2,ty+70,118,10,"#eff6ff","center",900);}
+}
+
+/* === PLAYER === */
+function drawPlayer(){
+  syncCharacterState();
+  const x=S.character.x,y=S.character.y,bob=S.mv?Math.sin(S.an*12)*2:Math.sin(S.an*2)*.7;
+  if(dILive("farmer",x,y+bob+2,54,68,.5,.84,1,S.mv?4.5:3.2,S.mv?1.1:.55))return;
+  cx.save();cx.translate(x,y+bob);
+  cx.fillStyle="rgba(0,0,0,.16)";cx.beginPath();cx.ellipse(0,14,10,4,0,0,Math.PI*2);cx.fill();
+  fR(-7,-4,14,16,5,"#67d6b0");fR(-7,7,5,10,3,"#2f80d0");fR(2,7,5,10,3,"#2f80d0");
+  cx.fillStyle="#fee2b3";cx.beginPath();cx.arc(0,-10,8,0,Math.PI*2);cx.fill();
+  cx.fillStyle="#facc15";cx.beginPath();cx.ellipse(0,-16,11,4,0,0,Math.PI*2);cx.fill();
+  cx.fillStyle="#eab308";cx.beginPath();cx.moveTo(-7,-16);cx.quadraticCurveTo(0,-28,7,-16);cx.closePath();cx.fill();
+  const ed=S.p.f==="left"?-2:S.p.f==="right"?2:0;
+  cx.fillStyle="#3f2d20";cx.beginPath();cx.arc(-3+ed,-11,1.3,0,Math.PI*2);cx.arc(3+ed,-11,1.3,0,Math.PI*2);cx.fill();
+  cx.restore();
+}
+
+/* === HUD === */
+function drawHUD(){
+  // Main bar only (no inventory bar)
+  fR(0,0,W,44,0,"rgba(15,23,42,.78)");
+  sR(0,0,W,44,0,"rgba(255,255,255,.1)",1);
+  fT("농장 마을",68,22,120,16,"#d9f99d","center",900);
+  dChip(148,10,96,farmClockText(),"#d9f99d");
+  dChip(254,10,112,clockTimeText(),"#bbf7d0");
+  dChip(376,10,66,`레벨 ${S.level}`,"#fde68a",S.lp);
+  dChip(452,10,80,`${S.gold}골드`,"#facc15");
+  dChip(542,10,100,`${S.exp}/${lTh()}`,"#bfdbfe");
+  const rat=cl(S.exp/lTh(),0,1);
+  fR(267,36,86,5,2.5,"rgba(15,23,42,.3)");fR(267,36,86*clockProgress(),5,2.5,"#bbf7d0");
+  fR(511,36,90,5,2.5,"rgba(15,23,42,.3)");fR(511,36,90*rat,5,2.5,"#84cc16");
+  const ev={clear:["맑음","#d9f99d"],drought:["가뭄","#fed7aa"],typhoon:["태풍","#cbd5e1"],flood:["홍수","#bfdbfe"]}[S.et]||["맑음","#d9f99d"];
+  fR(664,10,48,24,12,ev[1]);fT(ev[0],688,22,40,11,"#355e3b","center",900);
+  fT(S.ev,722,22,132,12,"#e2e8f0","left",700);
+  S._langToggle={x:858,y:12,w:54,h:22};
+  const langHot=hoverRect(S._langToggle);
+  fR(S._langToggle.x,S._langToggle.y,S._langToggle.w,S._langToggle.h,11,langHot?"rgba(191,219,254,.95)":"rgba(255,253,244,.9)");
+  sR(S._langToggle.x,S._langToggle.y,S._langToggle.w,S._langToggle.h,11,langHot?"#60a5fa":"rgba(147,197,253,.65)",1.5);
+  fT(S.lang==="en"?"KR":"EN",S._langToggle.x+S._langToggle.w/2,S._langToggle.y+11,42,10,"#1e3a8a","center",950);
+  // Hint: I key
+  fR(W-90,14,80,20,10,"rgba(255,253,244,.25)");
+  fT("[I] 인벤토리",W-50,24,72,9,"#d9f99d","center",700);
+}
+function dChip(x,y,w,v,ac,pl=0){
+  if(pl>0){cx.save();cx.globalAlpha=pl*.4;sR(x-3,y-3,w+6,30,14,"#fff7a8",2);cx.restore();}
+  fR(x,y,w,24,12,"rgba(255,253,244,.92)");
+  cx.fillStyle=ac;cx.beginPath();cx.arc(x+w-9,y+8,3.5,0,Math.PI*2);cx.fill();
+  fT(String(v),x+w/2-1,y+12,w-16,12,"#1f2937","center",900);
+}
+
+/* === INVENTORY OVERLAY (I key) === */
+S.showInv=false;
+function drawInvUI(){
+  if(!S.showInv) return;
+  cx.fillStyle="rgba(15,23,42,.55)";cx.fillRect(0,0,W,H);
+  const pw=440,ph=430,px=W/2-pw/2,py=H/2-ph/2;
+  fR(px,py,pw,ph,18,"rgba(255,253,244,.97)");sR(px,py,pw,ph,18,"#84cc16",2.5);
+  fT("인벤토리",W/2,py+28,300,20,"#3d2a12","center",900);
+  // Close hint
+  S._invClose={x:px+pw-40,y:py+8,w:34,h:24};
+  fR(S._invClose.x,S._invClose.y,S._invClose.w,S._invClose.h,12,"rgba(239,68,68,.12)");fT("X",S._invClose.x+S._invClose.w/2,S._invClose.y+S._invClose.h/2,22,14,"#dc2626","center",900);
+  // Resource grid
+  const items=[
+    ...CROP_TYPES.map(c=>[c.label+" 씨앗",S.inv[c.seed]||0,c.color,c.seedIcon]),
+    ...CROP_TYPES.map(c=>[c.label,S.inv[c.id]||0,c.color,c.cropIcon]),
+    ["우유",S.milk,"#64748b","milk"],["달걀",S.eggs,"#eab308","egg"],["양털",S.wool,"#a855f7","fleece"],["골드",S.gold,"#facc15","iconBuy"]
+  ];
+  const cols=4,iw=95,ih=54,gx=px+22,gy=py+54,gap=8;
+  for(let i=0;i<items.length;i++){
+    const[name,count,color,icon]=items[i];
+    const col=i%cols,row=Math.floor(i/cols);
+    const ix=gx+col*(iw+gap),iy=gy+row*(ih+gap);
+    fR(ix,iy,iw,ih,12,"rgba(255,253,244,.6)");sR(ix,iy,iw,ih,12,color+"44",1.5);
+    // Icon
+    dI(icon,ix+22,iy+27,28,28,.5,.5);
+    // Name
+    fT(name,ix+60,iy+18,62,9,color,"center",800);
+    // Count
+    fT(String(count),ix+60,iy+38,52,13,"#1f2937","center",900);
+  }
+  // Stats summary
+  const sy2=py+ph-48;
+  fR(px+16,sy2,pw-32,36,10,"rgba(15,23,42,.06)");
+  fT(`${farmClockText()} · 레벨 ${S.level} · 경험치 ${S.exp}/${lTh()}`,W/2,sy2+18,pw-50,12,"#64748b","center",700);
+}
+
+/* === MSG / EVENT / WEATHER === */
+function drawMsg(){const fl=S.mf,bg=S.mt2==="warn"?`rgba(127,29,29,${.78+fl*.12})`:`rgba(37,56,43,${.78+fl*.1})`;fR(0,H-26,W,26,0,bg);if(fl>0){cx.save();cx.globalAlpha=fl*.4;sR(0,H-28,W,30,0,S.mt2==="warn"?"#fecaca":"#bbf7d0",2);cx.restore();}fT(S.msg,W/2,H-13,W-40,12,"#fff8dd","center",760);}
+function drawEB(){if(S.ef<=0)return;const a=Math.min(1,S.ef),d=({clear:["맑음","#d9f99d","#2f5d35"],drought:["가뭄","#fed7aa","#7c2d12"],typhoon:["태풍","#cbd5e1","#334155"],flood:["홍수","#bfdbfe","#1e3a8a"]}[S.et]||["맑음","#d9f99d","#2f5d35"]),yy=76-(1-a)*14;cx.save();cx.globalAlpha=a;fR(W/2-160,yy,320,32,14,"rgba(255,253,244,.94)");sR(W/2-160,yy,320,32,14,d[1],2);fR(W/2-150,yy+4,64,24,10,d[1]);fT(d[0],W/2-118,yy+16,52,12,d[2],"center",900);fT(S.ev,W/2-80,yy+16,230,12,"#24352a","left",800);cx.restore();}
+function drawW(){if(S.wf>0){cx.fillStyle=`rgba(255,247,168,${S.wf*.08})`;cx.fillRect(0,72,W,H-72);}if(S.et==="drought"){cx.fillStyle="rgba(245,158,11,.06)";cx.fillRect(0,72,W,H-72);}if(S.et==="flood"){cx.fillStyle="rgba(96,165,250,.06)";cx.fillRect(0,72,W,H-72);}if(S.et==="typhoon"){cx.fillStyle="rgba(71,85,105,.06)";cx.fillRect(0,72,W,H-72);}}
+
+/* === SHOP UI === */
+function drawShopBack(px,py,target="main"){
+  iconButton(px+22,py+48,88,28,"< 뒤로","rgba(255,255,255,.9)","rgba(100,116,139,.35)","#334155",true);
+  S._sb.push({x:px+22,y:py+48,w:88,h:28,back:target,cB:true});
+}
+
+function drawShopPill(x,y,w,h,label,enabled,accent,hot=false){
+  const fill=enabled?(hot?accent:"#ffffff"):"rgba(226,232,240,.7)";
+  const stroke=enabled?accent+"cc":"rgba(148,163,184,.55)";
+  const text=enabled?(hot?"#fff":accent):"#94a3b8";
+  uiShadow(x,y,w,h,12,enabled?(hot?.18:.08):.03);
+  fR(x,y,w,h,12,fill);
+  sR(x,y,w,h,12,stroke,enabled?1.8:1.2);
+  fT(label,x+w/2,y+h/2,w-18,10,text,"center",950);
+}
+
+function drawShopProductCard(ix,iy,iw,ih,icon,label,meta,enabled,accent,actionLabel){
+  const hot=hoverRect({x:ix,y:iy,w:iw,h:ih}),lift=hot&&enabled?-3:0;
+  uiShadow(ix,iy+lift,iw,ih,14,enabled?.14:.05);
+  const bg=enabled?(hot?"rgba(255,255,255,.98)":"rgba(255,253,244,.9)"):"rgba(241,245,249,.76)";
+  fR(ix,iy+lift,iw,ih,14,bg);
+  sR(ix,iy+lift,iw,ih,14,enabled?accent+"cc":"rgba(148,163,184,.55)",enabled?2:1.3);
+  const glow=cx.createRadialGradient(ix+34,iy+34+lift,4,ix+34,iy+34+lift,44);
+  glow.addColorStop(0,enabled?accent+"44":"rgba(148,163,184,.18)");
+  glow.addColorStop(1,"rgba(255,255,255,0)");
+  cx.fillStyle=glow;cx.beginPath();cx.arc(ix+34,iy+34+lift,46,0,Math.PI*2);cx.fill();
+  cx.save();cx.globalAlpha=enabled?1:.42;dILive(icon,ix+34,iy+35+lift,38,38,.5,.5,1,ix*.01,.45);cx.restore();
+  fT(label,ix+92,iy+20+lift,96,11,enabled?"#1f2937":"#64748b","center",950);
+  fT(meta,ix+92,iy+43+lift,100,9,enabled?"#166534":"#94a3b8","center",800);
+  const bx=ix+iw-82,by=iy+ih-36+lift,bw=70,bh=26;
+  drawShopPill(bx,by,bw,bh,actionLabel,enabled,accent,hot);
+  return{x:bx,y:by,w:bw,h:bh,enabled};
+}
+
+function drawShopLivestockCard(ix,iy,iw,ih,icon,label,meta,enabled,accent,actionLabel){
+  const hot=hoverRect({x:ix,y:iy,w:iw,h:ih}),lift=hot&&enabled?-3:0;
+  uiShadow(ix,iy+lift,iw,ih,16,enabled?.14:.05);
+  fR(ix,iy+lift,iw,ih,16,enabled?(hot?"rgba(255,255,255,.98)":"rgba(255,253,244,.9)"):"rgba(241,245,249,.76)");
+  sR(ix,iy+lift,iw,ih,16,enabled?accent+"cc":"rgba(148,163,184,.55)",enabled?2:1.3);
+  const imgY=iy+44+lift;
+  const glow=cx.createRadialGradient(ix+iw/2,imgY,4,ix+iw/2,imgY,54);
+  glow.addColorStop(0,enabled?accent+"35":"rgba(148,163,184,.15)");
+  glow.addColorStop(1,"rgba(255,255,255,0)");
+  cx.fillStyle=glow;cx.beginPath();cx.arc(ix+iw/2,imgY,56,0,Math.PI*2);cx.fill();
+  cx.save();cx.globalAlpha=enabled?1:.42;if(!dILive(icon,ix+iw/2,imgY,54,48,.5,.5,1,ix*.01,.6)){if(icon==="sheep")dSheepFB(ix+iw/2,imgY+6,.74);else if(icon==="cow")dCowFB(ix+iw/2,imgY+6,.56);else if(icon==="chicken")dChickFB(ix+iw/2,imgY+6,.54);}cx.restore();
+  fT(label,ix+iw/2,iy+88+lift,iw-34,13,enabled?"#1f2937":"#64748b","center",950);
+  const metaLines=String(meta).split("\n");
+  for(let j=0;j<metaLines.length;j++)fT(metaLines[j],ix+iw/2,iy+111+j*16+lift,iw-34,10,enabled?"#166534":"#94a3b8","center",850);
+  const bw=92,bh=30,bx=ix+iw/2-bw/2,by=iy+ih-38+lift;
+  drawShopPill(bx,by,bw,bh,actionLabel,enabled,accent,hot);
+  return{x:bx,y:by,w:bw,h:bh,enabled};
+}
+
+function drawShopSellItem(item,ix,iy,iw,ih){
+  const count=S.inv[item.id]||0,enabled=count>0;
+  const btn=drawShopProductCard(ix,iy,iw,ih,item.icon,item.label,`보유 ${count} · ${item.price}골드`,enabled,item.color,"판매");
+  S._sb.push({x:btn.x,y:btn.y,w:btn.w,h:btn.h,sell:item,cB:enabled});
+}
+
+function drawShopAnimalSellItem(item,ix,iy,iw,ih){
+  const count=countAnimals(item.type),enabled=count>0;
+  const btn=drawShopProductCard(ix,iy,iw,ih,item.icon,item.label,`보유 ${count} · ${item.price}골드`,enabled,item.color,"판매");
+  S._sb.push({x:btn.x,y:btn.y,w:btn.w,h:btn.h,sellAnimalType:item.type,cB:enabled});
+}
+
+function drawSUI(){
+  if(!S.ss)return;drawScreenBackdrop("shopScreen","rgba(62,35,11,.42)");
+  const pw=640,ph=440,px=W/2-pw/2,py=H/2-ph/2;
+  uiPanel(px,py,pw,ph,18,"rgba(250,204,21,.88)");
+  fT("상점",W/2,py+24,300,19,"#3d2a12","center",950);
+  fT("씨앗, 가축, 판매 품목을 한 곳에서 관리",W/2,py+48,360,10,"#78716c","center",760);
+  iconButton(px+pw-42,py+10,32,24,"X","rgba(254,226,226,.95)","rgba(239,68,68,.42)","#dc2626",true);
+  S._sc={x:px+pw-42,y:py+10,w:32,h:24};S._sb=[];
+  if(S.shopView==="main"){
+    const opts=[["씨앗 구매","seeds","#22c55e","작물 성장의 시작"],["가축 구매","livestock","#f97316","목장 생산력 확장"],["판매","sell","#0ea5e9","수확물을 골드로 전환"]];
+    for(let i=0;i<opts.length;i++)drawShopMenuOption(px,py,pw,py+90+i*76,i+1,opts[i][0],opts[i][1],opts[i][2],opts[i][3]);
+  }else{
+    drawShopBack(px,py,(S.shopView==="sellCrops"||S.shopView==="sellLivestock")?"sell":"main");
+    if(S.shopView==="seeds"){
+      const cols=3,iw=178,ih=86,gap=18,gx=px+(pw-(cols*iw+(cols-1)*gap))/2,gy=py+88;
+      for(let i=0;i<CROP_TYPES.length;i++){const c=CROP_TYPES[i],col=i%cols,row=Math.floor(i/cols),ix=gx+col*(iw+gap),iy=gy+row*(ih+gap),price=c.category==="apple"?30:12,locked=c.category==="apple"&&!S.stage15Cleared,cB=!locked&&S.gold>=price;
+        const btn=drawShopProductCard(ix,iy,iw,ih,c.seedIcon,c.label,locked?"1-5 클리어 필요":`${price}골드 / 3개`,cB,c.color,locked?"잠김":"구매");
+        S._sb.push({x:btn.x,y:btn.y,w:btn.w,h:btn.h,crop:c,cB});
+      }
+    }else if(S.shopView==="livestock"){
+      const iw=168,ih=190,gap=26,gx=px+(pw-(LIVESTOCK_SHOP_ITEMS.length*iw+(LIVESTOCK_SHOP_ITEMS.length-1)*gap))/2,gy=py+96;
+      for(let i=0;i<LIVESTOCK_SHOP_ITEMS.length;i++){const it=LIVESTOCK_SHOP_ITEMS[i],type=Object.keys(it.give).find(k=>k==="cow"||k==="sheep"||k==="chicken"),d=animalDef(type),ix=gx+i*(iw+gap),iy=gy,space=hasRanchSpace(),cB=S.gold>=it.cost&&space;
+        const meta=`${it.cost}골드\n${d.days}일마다 ${d.productLabel} 생산`;
+        const btn=drawShopLivestockCard(ix,iy,iw,ih,it.icon,LIVESTOCK_LABELS[type]||type,meta,cB,"#f97316",space?"구매":"가득 참");
+        S._sb.push({x:btn.x,y:btn.y,w:btn.w,h:btn.h,it,cB});
+      }
+    }else if(S.shopView==="sell"){
+      const opts=[["작물 판매","sellCrops","#22c55e","6종 작물 판매"],["가축 및 생산물 판매","sellLivestock","#f97316","가축과 생산물 판매"]];
+      for(let i=0;i<opts.length;i++)drawShopMenuOption(px,py,pw,py+120+i*86,i+1,opts[i][0],opts[i][1],opts[i][2],opts[i][3]);
+    }else if(S.shopView==="sellCrops"){
+      const sellItems=CROP_TYPES.map(c=>({id:c.id,label:c.label,icon:c.cropIcon,price:c.category==="apple"?15:5,color:c.color}));
+      const cols=3,iw=178,ih=94,gap=20,gx=px+(pw-(cols*iw+(cols-1)*gap))/2,gy=py+88;
+      for(let i=0;i<sellItems.length;i++){const ix=gx+(i%cols)*(iw+gap),iy=gy+Math.floor(i/cols)*(ih+gap);drawShopSellItem(sellItems[i],ix,iy,iw,ih);}
+    }else if(S.shopView==="sellLivestock"){
+      const animalItems=["cow","sheep","chicken"].map(type=>({type,label:animalDef(type).label,icon:animalDef(type).icon,price:animalSellPrice(type),color:animalDef(type).color}));
+      const sellItems=[...animalItems,...SELL_PRODUCTS.map(item=>({product:item}))];
+      const cols=3,iw=178,ih=94,gap=20,gx=px+(pw-(cols*iw+(cols-1)*gap))/2,gy=py+88;
+      for(let i=0;i<sellItems.length;i++){
+        const ix=gx+(i%cols)*(iw+gap),iy=gy+Math.floor(i/cols)*(ih+gap),item=sellItems[i];
+        if(item.product)drawShopSellItem(item.product,ix,iy,iw,ih);
+        else drawShopAnimalSellItem(item,ix,iy,iw,ih);
+      }
+    }
+  }
+  fR(px+18,py+ph-38,pw-36,28,10,"rgba(15,23,42,.06)");sR(px+18,py+ph-38,pw-36,28,10,"rgba(15,23,42,.08)",1);fT(`골드 ${S.gold} · 씨앗 ${S.seeds} · 작물 ${S.turnips} · 가축 ${occupiedRanchCount()}/${RANCH_CAPACITY}`,W/2,py+ph-24,pw-60,10,"#64748b","center",760);
+}
+
+function drawSeedUI(){
+  if(!S.seedUI)return;
+  cx.fillStyle="rgba(15,23,42,.42)";cx.fillRect(0,0,W,H);
+  const pw=640,ph=360,px=W/2-pw/2,py=H/2-ph/2;uiPanel(px,py,pw,ph,20,"rgba(132,204,22,.92)");
+  fT("심을 씨앗 선택",W/2,py+25,300,19,"#365314","center",950);
+  fT("밭에 심을 작물을 고르고 성장 보상을 확인",W/2,py+49,390,10,"#4d7c0f","center",780);S._seedButtons=[];
+  iconButton(px+pw-42,py+10,32,24,"X","rgba(254,226,226,.95)","rgba(239,68,68,.42)","#dc2626",true);S._seedClose={x:px+pw-42,y:py+10,w:32,h:24};
+
+  const owned=CROP_TYPES.filter(c=>(S.inv[c.seed]||0)>0);
+  if(!owned.some(c=>c.id===S.seedUI.selectedCropId))S.seedUI.selectedCropId=null;
+  const selected=S.seedUI.selectedCropId?cropDef(S.seedUI.selectedCropId):null;
+  const gridX=px+26,gridY=py+78,iw=180,ih=66,gap=10;
+  for(let i=0;i<CROP_TYPES.length;i++){
+    const c=CROP_TYPES[i],cnt=S.inv[c.seed]||0,enabled=cnt>0;
+    const ix=gridX+(i%2)*(iw+gap),iy=gridY+Math.floor(i/2)*(ih+gap);
+    const hot=hoverRect({x:ix,y:iy,w:iw,h:ih}),active=selected&&selected.id===c.id,lift=hot&&enabled?-2:0;
+    uiShadow(ix,iy+lift,iw,ih,13,enabled?.1:.035);
+    fR(ix,iy+lift,iw,ih,13,enabled?(hot||active?"rgba(255,255,255,.97)":"rgba(255,253,244,.84)"):"rgba(226,232,240,.58)");
+    sR(ix,iy+lift,iw,ih,13,enabled?c.color+(active?"dd":"99"):"rgba(148,163,184,.45)",active?2.4:1.4);
+    const halo=cx.createRadialGradient(ix+31,iy+33+lift,3,ix+31,iy+33+lift,34);halo.addColorStop(0,enabled?c.color+"44":"rgba(148,163,184,.2)");halo.addColorStop(1,"rgba(255,255,255,0)");cx.fillStyle=halo;cx.beginPath();cx.arc(ix+31,iy+33+lift,36,0,Math.PI*2);cx.fill();
+    cx.save();cx.globalAlpha=enabled?1:.38;dILive(c.seedIcon,ix+31,iy+33+lift,35,35,.5,.5,1,i,.55);cx.restore();
+    fT(c.label,ix+94,iy+20+lift,120,10,enabled?"#1f2937":"#94a3b8","center",930);
+    fT(enabled?`보유 ${cnt}`:"씨앗 없음",ix+94,iy+42+lift,110,9,enabled?"#166534":"#94a3b8","center",780);
+    if(enabled)S._seedButtons.push({x:ix,y:iy,w:iw,h:ih,crop:c,kind:"select"});
+  }
+
+  const cardX=px+424,cardY=py+80,cardW=188,cardH=222;
+  uiShadow(cardX,cardY,cardW,cardH,18,.14);fR(cardX,cardY,cardW,cardH,18,selected?"rgba(255,253,244,.9)":"rgba(226,232,240,.72)");sR(cardX,cardY,cardW,cardH,18,selected?selected.color+"bb":"rgba(148,163,184,.55)",selected?2:1.6);
+  if(selected){
+    const pg=cx.createRadialGradient(cardX+cardW/2,cardY+68,8,cardX+cardW/2,cardY+68,74);pg.addColorStop(0,selected.color+"55");pg.addColorStop(1,selected.color+"00");cx.fillStyle=pg;cx.beginPath();cx.arc(cardX+cardW/2,cardY+70,78,0,Math.PI*2);cx.fill();
+    dILive(selected.cropIcon,cardX+cardW/2,cardY+66,62,62,.5,.5,1,.2,.7);
+    fT(selected.label,cardX+cardW/2,cardY+114,150,14,selected.color,"center",950);
+    fT(`${selected.category==="apple"?"긴 성장":"빠른 성장"} · 경험치 +${selected.exp}`,cardX+cardW/2,cardY+139,150,10,"#475569","center",780);
+    fR(cardX+22,cardY+158,cardW-44,13,7,"rgba(15,23,42,.08)");
+    fR(cardX+22,cardY+158,(cardW-44)*(selected.category==="apple"?.92:.38),13,7,selected.color);
+    fT(`성장 ${selected.grow}초`,cardX+cardW/2,cardY+183,130,10,"#64748b","center",780);
+    drawShopPill(cardX+31,cardY+196,cardW-62,28,"선택한 씨앗 심기",(S.inv[selected.seed]||0)>0,selected.color,hoverRect({x:cardX+31,y:cardY+196,w:cardW-62,h:28}));
+    if((S.inv[selected.seed]||0)>0)S._seedButtons.push({x:cardX+31,y:cardY+196,w:cardW-62,h:28,crop:selected,kind:"plant"});
+  }else{
+    fR(cardX+38,cardY+36,cardW-76,cardW-76,16,"rgba(148,163,184,.32)");
+    sR(cardX+38,cardY+36,cardW-76,cardW-76,16,"rgba(100,116,139,.38)",1.4);
+    fT(owned.length?"작물을 선택하세요":"보유한 씨앗 없음",cardX+cardW/2,cardY+158,150,13,"#64748b","center",900);
+    fT(owned.length?"왼쪽에서 씨앗을 고르면 정보가 표시됩니다.":"상점에서 씨앗을 구매한 뒤 심을 수 있습니다.",cardX+cardW/2,cardY+181,150,9,"#94a3b8","center",760);
+  }
+  fR(px+22,py+ph-42,pw-44,26,11,"rgba(15,23,42,.06)");fT(`선택한 밭: ${S.seedUI.plot.gr-CR1+1}행 ${S.seedUI.plot.gc-CC1+1}열 · 전체 씨앗 ${S.seeds}`,W/2,py+ph-29,pw-70,10,"#64748b","center",780);
+}
+
+function drawTrainingUI(){
+  if(!S.trainUI)return;drawScreenBackdrop("trainingScreen","rgba(11,30,64,.44)");
+  const pw=720,ph=540,px=W/2-pw/2,py=H/2-ph/2;uiPanel(px,py,pw,ph,18,"rgba(96,165,250,.82)");
+  const level=trainingLevel(),job=trainingJob(),next=trainingNextLevel(),upgradeCheck=trainingCanStartUpgrade();
+  fT(`훈련소 Lv.${level}`,W/2,py+24,260,19,"#1e3a8a","center",950);
+  fT(`작물 훈련 추가 경험치 +${trainingBonusPercent()}%`,W/2,py+50,390,10,"#64748b","center",760);
+  iconButton(px+pw-42,py+10,32,24,"X","rgba(254,226,226,.95)","rgba(239,68,68,.42)","#dc2626",true);S._trainClose={x:px+pw-42,y:py+10,w:32,h:24};S._trainButtons=[];S._trainUpgrade=null;
+  for(let i=0;i<S.heroes.length;i++){const h=S.heroes[i],x=px+38+i*216,y=py+78,cw=196,ch=334,hot=hoverRect({x,y,w:cw,h:ch});
+    uiShadow(x,y,cw,ch,14,.11);fR(x,y,cw,ch,14,hot?"rgba(255,255,255,.96)":"rgba(239,246,255,.82)");sR(x,y,cw,ch,14,h.color+(hot?"cc":"88"),hot?2.2:1.5);
+    const halo=cx.createRadialGradient(x+98,y+62,4,x+98,y+62,78);halo.addColorStop(0,h.color+"66");halo.addColorStop(.58,h.color+"22");halo.addColorStop(1,h.color+"00");cx.fillStyle=halo;cx.beginPath();cx.arc(x+98,y+64,78,0,Math.PI*2);cx.fill();
+    cx.save();cx.globalAlpha=.2;cx.fillStyle="#0f172a";cx.beginPath();cx.ellipse(x+98,y+126,48,11,0,0,Math.PI*2);cx.fill();cx.restore();
+    if(!dILive(h.battleIcon,x+98,y+96,122,122,.5,.72,1,i*.7,hot?1.05:.86)&&!dBattleHero(h.sprite,x+98,y+96,116,116,1,i*.7,hot?1.05:.82))dILive(h.icon,x+98,y+66,66,66,.5,.5,1,i*.7,.85);
+    fT(h.label,x+98,y+150,150,13,h.color,"center",950);fT(`레벨 ${h.level}`,x+62,y+178,68,11,"#1f2937","center",900);fT(`공격 ${heroAttack(h)} · 체력 ${heroHp(h)}`,x+124,y+178,106,10,"#475569","center",760);
+    const need=reqExp(h),prog=cl(h.exp/need,0,1);fR(x+28,y+200,140,10,5,"rgba(15,23,42,.1)");fR(x+28,y+200,140*prog,10,5,h.color);fT(`${h.exp}/${need}`,x+98,y+218,110,8,"#64748b","center",760);
+    for(const [j,cat] of ["berry","apple"].entries()){const c=cropsByElement(h.element,cat),cnt=S.inv[c.id]||0,gain=boostedCropExp(c),bx=x+24,by=y+242+j*44,bw=148,bh=36,en=cnt>0,hotB=hoverRect({x:bx,y:by,w:bw,h:bh}),lift=hotB&&en?-2:0;
+      fR(bx,by+lift,bw,bh,9,en?(hotB?h.color+"33":h.color+"22"):"rgba(148,163,184,.18)");sR(bx,by+lift,bw,bh,9,en?h.color+"aa":"rgba(148,163,184,.45)",en&&hotB?1.8:1);
+      cx.save();cx.globalAlpha=en?1:.46;dILive(c.cropIcon,bx+19,by+17+lift,24,24,.5,.5,1,j+i,.45);cx.restore();
+      fT(`${cat==="berry"?"베리":"사과"} +${gain}`,bx+82,by+11+lift,86,9,en?"#1f2937":"#94a3b8","center",850);fT(`보유 ${cnt}`,bx+82,by+25+lift,70,8,en?"#166534":"#94a3b8","center",760);S._trainButtons.push({x:bx,y:by,w:bw,h:bh,hero:h,crop:c,enabled:en});}
+  }
+  const uy=py+424,uh=88,canUpgrade=upgradeCheck.ok&&!job&&level<TRAINING_MAX_LEVEL;
+  const status=level>=TRAINING_MAX_LEVEL?"최대 레벨입니다.":job?`업그레이드 진행 중 · 남은 시간 ${Math.ceil(job.remaining)}초`:upgradeCheck.ok?"업그레이드 가능":upgradeCheck.msg;
+  const targetLabel=level>=TRAINING_MAX_LEVEL?"Lv.10":`Lv.${next}`;
+  const currentBonus=trainingBonusPercent(level),nextBonus=trainingBonusPercent(next);
+  const benefit=level>=TRAINING_MAX_LEVEL?`현재 효과: 작물 훈련 추가 경험치 +${currentBonus}%`:`레벨업 효과: 작물 훈련 추가 경험치 +${currentBonus}% -> +${nextBonus}%`;
+  fR(px+28,uy,pw-56,uh,15,"rgba(239,246,255,.9)");sR(px+28,uy,pw-56,uh,15,canUpgrade?"rgba(37,99,235,.5)":"rgba(148,163,184,.45)",1.4);
+  fT("훈련소 업그레이드",px+52,uy+18,150,13,"#1e3a8a","left",950);
+  fT(`${targetLabel} · 필요 ${trainingUpgradeCost(next)}골드 · 캐릭터 Lv.${next} · ${trainingUpgradeSeconds(next)}초`,px+52,uy+40,360,10,"#475569","left",820);
+  fT(benefit,px+52,uy+64,292,10,"#2563eb","left",850);
+  wrapT(status,px+374,uy+58,166,15,11,canUpgrade?"#166534":"#b45309",850);
+  const upRect={x:px+556,y:uy+48,w:128,h:32},upHot=hoverRect(upRect);
+  drawShopPill(upRect.x,upRect.y,upRect.w,upRect.h,job?"진행 중":level>=TRAINING_MAX_LEVEL?"완료":"레벨업",canUpgrade,"#2563eb",upHot&&canUpgrade);
+  if(canUpgrade)S._trainUpgrade={...upRect,enabled:true};
+}
+
+function drawTrainingBuildUI(){
+  if(!S.buildUI)return;
+  cx.fillStyle="rgba(15,23,42,.42)";cx.fillRect(0,0,W,H);
+  const pw=330,ph=214,px=W/2-pw/2,py=H/2-ph/2;
+  uiPanel(px,py,pw,ph,20,"rgba(250,204,21,.72)");
+  const level=trainingLevel(),target=trainingNextLevel(),job=trainingJob(),check=trainingCanStartUpgrade();
+  const cost=trainingUpgradeCost(target),seconds=trainingUpgradeSeconds(target);
+  S._buildClose={x:px+pw-46,y:py+13,w:32,h:26};
+  S._buildAction=null;
+  fT(level===0?"훈련소 공터":"훈련소",W/2,py+28,210,18,"#3d2a12","center",950);
+  iconButton(S._buildClose.x,S._buildClose.y,S._buildClose.w,S._buildClose.h,"X","rgba(254,226,226,.96)","rgba(239,68,68,.42)","#dc2626",true);
+
+  const bx=px+30,by=py+58,bw=pw-60,bh=88;
+  fR(bx,by,bw,bh,16,"rgba(255,253,244,.9)");
+  sR(bx,by,bw,bh,16,"rgba(132,204,22,.35)",1.4);
+  if(job){
+    const progress=cl(1-job.remaining/job.total,0,1);
+    fT("건설 진행 중",W/2,by+22,bw-40,14,"#1e3a8a","center",950);
+    fT(`남은 시간 ${Math.ceil(job.remaining)}초`,W/2,by+46,bw-44,11,"#475569","center",820);
+    fR(bx+30,by+64,bw-60,10,5,"rgba(15,23,42,.1)");
+    fR(bx+30,by+64,(bw-60)*progress,10,5,"#60a5fa");
+  }else{
+    fT("필요 골드",bx+36,by+26,90,11,"#64748b","left",820);
+    fT(`${cost}골드`,bx+bw-36,by+26,100,13,S.gold>=cost?"#166534":"#b91c1c","right",950);
+    fT("건설 시간",bx+36,by+58,90,11,"#64748b","left",820);
+    fT(`${seconds}초`,bx+bw-36,by+58,100,13,"#1e3a8a","right",950);
+  }
+
+  const status=job?"작업이 끝나면 훈련소를 사용할 수 있어요.":check.ok?"건설을 시작할 수 있어요.":check.msg;
+  fT(status,W/2,py+160,pw-54,10,check.ok&&!job?"#166534":"#b45309","center",820);
+  const action={x:px+52,y:py+174,w:pw-104,h:30},hot=hoverRect(action),enabled=check.ok&&!job;
+  drawShopPill(action.x,action.y,action.w,action.h,job?"건설 중":"건설 시작",enabled,"#65a30d",hot&&enabled);
+  if(enabled)S._buildAction={...action,enabled:true};
+}
+
+function drawDailyPopup(){
+  if(!S.dailyPopup)return;
+  cx.fillStyle="rgba(15,23,42,.48)";cx.fillRect(0,0,W,H);
+  const pw=440,ph=250,px=W/2-pw/2,py=H/2-ph/2;
+  uiPanel(px,py,pw,ph,20,"rgba(250,204,21,.72)");
+  const weather=S.dailyPopup.weather,accent={clear:"#65a30d",drought:"#f97316",typhoon:"#64748b",flood:"#2563eb"}[weather]||"#65a30d";
+  fT(`${S.dailyPopup.day}일차 시작`,W/2,py+34,260,21,"#3d2a12","center",950);
+  fR(px+36,py+66,pw-72,48,16,"rgba(255,253,244,.82)");
+  fT(`생활 지원금 +${S.dailyPopup.gold}골드 획득`,W/2,py+90,pw-110,15,"#92400e","center",920);
+  fR(px+36,py+126,pw-72,70,16,"rgba(248,250,252,.88)");
+  sR(px+36,py+126,pw-72,70,16,accent+"88",1.6);
+  fT(`오늘의 날씨: ${weatherName(weather)}`,W/2,py+148,pw-110,15,accent,"center",950);
+  fT(weatherEffect(weather),W/2,py+174,pw-104,12,"#334155","center",820);
+  const btn={x:W/2-70,y:py+210,w:140,h:32},hot=hoverRect(btn);
+  drawShopPill(btn.x,btn.y,btn.w,btn.h,"확인",true,accent,hot);
+  S._dailyConfirm=btn;
+}
+
+/* === MENU === */
+function drawMN(){if(!S.sm)return;const it=S.mi,mw=160,ih=34,mh=it.length*ih+14,mx=W/2-mw/2,my=H/2-mh/2;
+  cx.fillStyle="rgba(15,23,42,.4)";cx.fillRect(0,0,W,H);fR(mx,my,mw,mh,14,"rgba(255,253,244,.96)");sR(mx,my,mw,mh,14,"rgba(250,204,21,.6)",2);
+  fT(S.nz?S.nz.label:"",W/2,my+12,130,12,"#3d2a12","center",900);S.mb=[];
+  for(let i=0;i<it.length;i++){const iy=my+24+i*ih,isC=it[i].l==="닫기";fR(mx+8,iy,mw-16,28,8,isC?"rgba(239,68,68,.1)":"rgba(101,163,13,.12)");sR(mx+8,iy,mw-16,28,8,isC?"rgba(239,68,68,.25)":"rgba(101,163,13,.3)",1);fT(`${i+1}. ${it[i].l}`,W/2,iy+14,130,10,isC?"#b91c1c":"#166534","center",800);S.mb.push({x:mx+8,y:iy,w:mw-16,h:28,fn:it[i].f});}}
+
+/* === EFFECTS === */
+function drawFX(dt){
+  for(const p of S.pop){cx.save();cx.globalAlpha=p.l;tx(p.v,p.x,p.y,p.s,p.c,"center",900);cx.restore();p.y-=dt*28;p.l-=dt*1.2;}S.pop=S.pop.filter(p=>p.l>0);
+  for(const p of S.par){cx.save();cx.globalAlpha=p.l;cx.fillStyle=p.c;cx.beginPath();cx.arc(p.x,p.y,p.r,0,Math.PI*2);cx.fill();cx.restore();p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=80*dt;p.l-=dt*1.4;}S.par=S.par.filter(p=>p.l>0);}
+
+/* === LOOP === */
+function upd(dt){S.an+=dt;advanceFarmClock(dt);updateRanchProduction(dt);updateTrainingConstruction(dt);if(S.dailyPopup){S.dailyPopup.remaining-=dt;if(S.dailyPopup.remaining<=0)closeDailyPopup();}S.wf=Math.max(0,S.wf-dt*1.8);S.mf=Math.max(0,S.mf-dt*2.5);S.ef=Math.max(0,S.ef-dt*1.2);S.lp=Math.max(0,S.lp-dt*1.7);
+  for(const s of crops){s.pulse=Math.max(0,s.pulse-dt*2.7);if(s.state==="planted"||s.state==="watered"||s.state==="growing"){s.state="growing";const c=cropDef(s.crop);s.growTimer+=dt;if(s.growTimer>=(c?c.grow:10))s.state="mature";}}
+  hK(dt);}
+function ren(dt){cx.clearRect(0,0,W,H);drawMap();drawW();drawPlayer();drawTutorialFocus();drawHUD();drawActionStrip();drawEB();drawZoneInspector();drawMsg();drawFX(dt);drawMN();drawSUI();drawSeedUI();drawTrainingBuildUI();drawTrainingUI();drawInvUI();drawTutorialUI();drawDailyPopup();drawLanguageUI();}
+function frame(now){const sec=now/1000,dt=Math.min(.033,sec-(S.lt||sec));S.lt=sec;upd(dt);ren(dt);requestAnimationFrame(frame);}
+
+/* === INPUT === */
+addEventListener("keydown",e=>{S.keys[e.code]=true;if(handleCheatKey(e))return;if(languageActive()){if(e.code==="Digit1")setLanguage("ko");else if(e.code==="Digit2"||e.code==="Enter")setLanguage("en");return;}if(e.code==="KeyL"){toggleLanguage();return;}if(S.dailyPopup&&e.code==="Escape"){closeDailyPopup();return;}if(tutorialActive()&&e.code==="Escape"){skipTutorial();return;}if(e.code==="Space"){e.preventDefault();if(!S.ss&&!S.sm&&!S.showInv&&!S.seedUI&&!S.trainUI&&!S.buildUI&&!S.dailyPopup)openMenu();}if(e.code==="KeyI"&&!S.dailyPopup)S.showInv=!S.showInv;if(S.sm&&S.mi.length){const n=parseInt(e.key);if(n>=1&&n<=S.mi.length)S.mi[n-1].f();}if(e.code==="Escape"){S.sm=false;S.ss=false;S.showInv=false;S.seedUI=null;S.trainUI=false;S.buildUI=false;}});
+addEventListener("keyup",e=>{S.keys[e.code]=false;});
+
+function pC(e){const r=cv.getBoundingClientRect();return{x:((e.clientX-r.left)/r.width)*W,y:((e.clientY-r.top)/r.height)*H};}
+function ins(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
+cv.addEventListener("pointermove",e=>{const p=pC(e);S.mx=p.x;S.my=p.y;});
+cv.addEventListener("pointerleave",()=>{S.mx=-999;S.my=-999;});
+
+cv.addEventListener("pointerdown",e=>{
+  const p=pC(e);
+  S.mx=p.x;S.my=p.y;
+  if(languageActive()){const b=S._languageButtons.find(b=>ins(p,b));if(b)setLanguage(b.lang);return;}
+  if(S._langToggle&&ins(p,S._langToggle)){toggleLanguage();return;}
+  if(S.dailyPopup){if(S._dailyConfirm&&ins(p,S._dailyConfirm))closeDailyPopup();return;}
+  if(tutorialActive()){const b=S._tutorialButtons.find(b=>ins(p,b));if(b){if(b.kind==="skip")skipTutorial();return;}}
+  if(S.seedUI){if(S._seedClose&&ins(p,S._seedClose)){S.seedUI=null;return;}const b=S._seedButtons.find(b=>ins(p,b));if(b){if(b.kind==="select"){S.seedUI.selectedCropId=b.crop.id;sM(`${b.crop.label} 선택`);return;}plantSeed(S.seedUI.plot,b.crop);return;}return;}
+  if(S.buildUI){if(S._buildClose&&ins(p,S._buildClose)){S.buildUI=false;return;}if(S._buildAction&&ins(p,S._buildAction)){startTrainingUpgrade();return;}return;}
+  if(S.trainUI){if(S._trainClose&&ins(p,S._trainClose)){S.trainUI=false;return;}if(S._trainUpgrade&&ins(p,S._trainUpgrade)){startTrainingUpgrade();return;}const b=S._trainButtons.find(b=>ins(p,b)&&b.enabled);if(b){trainHero(b.hero,b.crop);return;}return;}
+  // Inventory UI click
+  if(S.showInv){if(S._invClose&&ins(p,S._invClose)){S.showInv=false;}return;}
+  // Shop UI clicks
+  if(S.ss){if(S._sc&&ins(p,S._sc)){S.ss=false;return;}if(S._sb){const b=S._sb.find(b=>ins(p,b)&&b.cB);if(b){if(b.back){S.shopView=b.back;return;}if(b.view){S.shopView=b.view;return;}if(b.crop){buySeed(b.crop);return;}if(b.sellAnimalType){sellAnimalType(b.sellAnimalType);return;}if(b.sellAnimal){sellAnimalSlot(b.sellAnimal);return;}if(b.sell){sellItem(b.sell);return;}if(b.it){hSB(b.it);return;}}}return;}
+  // Menu clicks
+  if(S.sm&&S.mb){const b=S.mb.find(b=>ins(p,b));if(b){b.fn();return;}S.sm=false;return;}
+  // World click ??interaction only (no movement)
+  const tc=Math.floor(p.x/TL),tr=Math.floor(p.y/TL);
+  if(tr>=0&&tr<RO&&tc>=0&&tc<CO){
+    const t=grid[tr][tc];
+    if(t===T.FARM){const s=crops.find(s=>s.gr===tr&&s.gc===tc);if(s){const d=Math.abs(S.p.r-tr)+Math.abs(S.p.c-tc);if(d<=3){hFC(tr,tc);return;}else{sM("작물밭에 더 가까이 가세요.");return;}}}
+    if(t===T.RANCH){const d=Math.abs(S.p.r-tr)+Math.abs(S.p.c-tc);if(d<=3){hRC(tr,tc);return;}else sM("가축장에 더 가까이 가세요.");}
+    if(t===T.SHOP){const d=Math.abs(S.p.r-tr)+Math.abs(S.p.c-tc);if(d<=4){S.ss=true;S.shopView="main";return;}else sM("상점에 더 가까이 가세요.");}
+    if(t===T.TRAINING){const d=Math.abs(S.p.r-tr)+Math.abs(S.p.c-tc);if(d<=4){openTrainingInteraction();return;}else sM("훈련소에 더 가까이 가세요.");}
+    if(t===T.HOME){const d=Math.abs(S.p.r-tr)+Math.abs(S.p.c-tc);if(d<=4){openBattle();return;}else sM("전투 포탈에 더 가까이 가세요.");}
+  }
+});
+
+/* === SAVE/RESTORE === */
+function saveFarm(){try{syncCharacterState();for(const s of ranch)if(s.animal)normalizeAnimalTimer(s.animal,animalDef(s.animal.type));sessionStorage.setItem("farmVillageState",JSON.stringify({day:S.day,dayElapsed:S.dayElapsed,gold:S.gold,exp:S.exp,level:S.level,lang:S.lang,inv:{...S.inv},trainingCenter:{level:trainingLevel(),job:trainingJob()?{...trainingJob()}:null},crops:crops.map(s=>({st:s.state,gt:s.growTimer,crop:s.crop})),ranch:ranch.map(s=>({a:s.animal?{...s.animal}:null})),heroes:S.heroes.map(h=>({element:h.element,level:h.level,exp:h.exp})),stage15Cleared:S.stage15Cleared,tutorialStep:S.tutorialStep,tutorialDone:S.tutorialDone,et:S.et,ev:S.ev,p:characterPosition()}));}catch(e){}}
+function restFarm(){try{const s=sessionStorage.getItem("farmVillageState"),storedLang=sessionStorage.getItem(FARM_SESSION_LANGUAGE_KEY);if(!s){if(storedLang==="en"||storedLang==="ko")setLanguage(storedLang);return;}const d=JSON.parse(s);for(const k of["day","gold","exp","level"])if(typeof d[k]==="number")S[k]=d[k];if(d.lang==="en"||d.lang==="ko")setLanguage(d.lang);else if(storedLang==="en"||storedLang==="ko")setLanguage(storedLang);S.dayElapsed=typeof d.dayElapsed==="number"?Math.max(0,d.dayElapsed%FARM_DAY_SECONDS):0;if(d.trainingCenter){S.trainingCenter.level=cl(d.trainingCenter.level||0,0,TRAINING_MAX_LEVEL);S.trainingCenter.job=d.trainingCenter.job?{target:cl(d.trainingCenter.job.target||S.trainingCenter.level+1,1,TRAINING_MAX_LEVEL),remaining:Math.max(0,d.trainingCenter.job.remaining||0),total:Math.max(1,d.trainingCenter.job.total||1)}:null;}if(d.inv)Object.assign(S.inv,d.inv);if(Array.isArray(d.crops))d.crops.forEach((v,i)=>{if(crops[i]){crops[i].state=v.st||"empty";crops[i].growTimer=v.gt||0;crops[i].crop=v.crop||null;}});if(Array.isArray(d.ranch))d.ranch.forEach((v,i)=>{if(ranch[i]){ranch[i].animal=v.a;if(ranch[i].animal)normalizeAnimalTimer(ranch[i].animal,animalDef(ranch[i].animal.type));}});if(Array.isArray(d.heroes))d.heroes.forEach(v=>{const h=S.heroes.find(h=>h.element===v.element);if(h){h.level=v.level||1;h.exp=v.exp||0;}});S.stage15Cleared=!!d.stage15Cleared;if(typeof d.tutorialStep==="number")S.tutorialStep=cl(d.tutorialStep,0,TUTORIAL_STEPS.length-1);if(typeof d.tutorialDone==="boolean")S.tutorialDone=d.tutorialDone;S.et=d.et==="pest"?"typhoon":d.et||S.et;S.ev=weatherText(S.et);if(d.p){restoreCharacter(d.p);syncCharacterState();}}catch(e){S.ev=weatherText(S.et);}}
+setInterval(saveFarm,2000);
+addEventListener("beforeunload",saveFarm);
+
+/* === DEBUG === */
+function dSn(){syncCharacterState();return{day:S.day,dayElapsed:S.dayElapsed,clock:farmClockText(),gold:S.gold,level:S.level,exp:S.exp,lang:S.lang,tutorial:{step:S.tutorialStep,done:S.tutorialDone},trainingCenter:{level:trainingLevel(),job:trainingJob()?{...trainingJob()}:null,multiplier:trainingExpMultiplier()},inv:{...S.inv},heroes:S.heroes.map(h=>({...h})),p:characterPosition(),crops:crops.map(s=>({st:s.state,gr:s.gr,gc:s.gc,gt:s.growTimer,crop:s.crop})),ranch:ranch.map(s=>({a:s.animal?{...s.animal}:null})),bs:JSON.parse(JSON.stringify(S.bs)),ar:Object.fromEntries(Object.entries(A).map(([k,i])=>[k,i.complete&&i.naturalWidth>0]))};}
+window.__farmVillageDebug={snapshot(){ren(0);return dSn();},run(){return this.snapshot();}};
+let dn=document.createElement("pre");dn.id="farm-debug-state";dn.hidden=true;document.body.appendChild(dn);setInterval(()=>{try{dn.textContent=JSON.stringify(dSn());}catch(e){}},500);
+
+function applyDebugView(){
+  const view=new URLSearchParams(location.search).get("debugView");
+  if(view==="shop"){S.ss=true;S.shopView="main";}
+  else if(view==="shopSeeds"){S.ss=true;S.shopView="seeds";}
+  else if(view==="shopLivestock"){S.ss=true;S.shopView="livestock";}
+  else if(view==="shopSell"){S.ss=true;S.shopView="sell";}
+  else if(view==="training"){openTrainingInteraction();}
+  else if(view==="farm"){
+    const plot=crops.find(s=>s.state==="empty")||crops[0];
+    if(plot){
+      S.seedUI={plot,selectedCropId:null};
+    }
+  }
+}
+restFarm();applyDebugView();cNZ();requestAnimationFrame(frame);
+</script>
+</body>
+</html>

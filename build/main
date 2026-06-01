@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -e
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+SERVER_HOST="${SERVER_HOST:-0.0.0.0}"
+URL_HOST="${URL_HOST:-127.0.0.1}"
+PORT="${PORT:-8000}"
+URL="http://${URL_HOST}:${PORT}/web/farm_village.html"
+
+echo ""
+echo "=========================================="
+echo " Team 13 Farm Village GUI"
+echo " VNC:  http://localhost:6080/vnc.html"
+echo " Game: ${URL}"
+echo "=========================================="
+echo ""
+
+if command -v python3 >/dev/null 2>&1; then
+  python3 -m http.server "$PORT" --bind "$SERVER_HOST" >/tmp/team13-demo-http.log 2>&1 &
+elif command -v python >/dev/null 2>&1; then
+  python -m http.server "$PORT" --bind "$SERVER_HOST" >/tmp/team13-demo-http.log 2>&1 &
+else
+  echo "Error: python3 or python is required to serve the GUI files." >&2
+  exit 1
+fi
+
+sleep 1
+
+launch_browser() {
+  if command -v chromium >/dev/null 2>&1; then
+    chromium --no-sandbox --disable-dev-shm-usage "$URL"
+    return
+  fi
+  if command -v chromium-browser >/dev/null 2>&1; then
+    chromium-browser --no-sandbox --disable-dev-shm-usage "$URL"
+    return
+  fi
+  if command -v google-chrome >/dev/null 2>&1; then
+    google-chrome --no-sandbox --disable-dev-shm-usage "$URL"
+    return
+  fi
+  if command -v firefox >/dev/null 2>&1; then
+    firefox "$URL"
+    return
+  fi
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$URL"
+    tail -f /tmp/team13-demo-http.log
+    return
+  fi
+  echo "No graphical browser was found in the container."
+  echo "The HTTP server is running at ${URL}."
+  tail -f /tmp/team13-demo-http.log
+}
+
+launch_browser

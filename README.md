@@ -1,6 +1,8 @@
 # Team_13_demo_gui
 
-Farm Village Simulator is a farm-management game where the player grows elemental crops, raises livestock, trains heroes, and explores battle stages.
+Farm Village Simulator is a cozy farm-management adventure where the player builds a small village into a lively elemental farm.
+Grow fire, water, and grass crops, raise animals for useful products, and use the harvest to train heroes for stage-based battles.
+Each day brings new choices: manage crops, visit the shop, upgrade the training center, or jump into the battle portal for rewards.
 
 # Run
 
@@ -31,8 +33,6 @@ If you do not want to run the server, you can also open this file directly:
 index.html
 ```
 
-No Docker or VNC setup is required because this demo is implemented as browser-based HTML/JavaScript.
-
 # Game System
 
 ### (1) Controls
@@ -41,7 +41,7 @@ No Docker or VNC setup is required because this demo is implemented as browser-b
 - Click farm plots to plant or harvest crops
 - Click ranch slots to check animals and collect products
 - Click the shop, training center, and battle portal directly to open each screen
-- Use on-screen buttons and cards to buy items, train heroes, and start battles
+- Use on-screen buttons to buy items, train heroes, and start battles
 
 ### (2) Farm Village
 
@@ -49,6 +49,7 @@ No Docker or VNC setup is required because this demo is implemented as browser-b
 - Buy seeds and livestock from the shop
 - Collect milk, eggs, and wool from animals
 - Progress days with weather events and daily support gold
+- One in-game day lasts 5 minutes
 
 ### (3) Training Center
 
@@ -65,7 +66,11 @@ No Docker or VNC setup is required because this demo is implemented as browser-b
 
 ### (5) Weather Events
 
-- Clear: crops grow normally.
-- Drought: harvest yield is reduced.
-- Typhoon: all animals in the ranch are lost.
-- Flood: all planted crops in the field are washed away.
+One of the following weather events occurs each day.
+
+| Weather | Effect |
+| --- | --- |
+| Clear | Crops grow normally. |
+| Drought | Harvest yield is reduced. |
+| Typhoon | All animals in the ranch are lost. |
+| Flood | All planted crops in the field are washed away. |

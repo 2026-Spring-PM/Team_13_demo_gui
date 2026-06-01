@@ -4,13 +4,29 @@ Farm Village Simulator is a farm-management game where the player grows elementa
 
 # Run
 
-(1) Pull Docker Image
+(1) Clone this repository
 
 ```sh
-docker pull --platform linux/amd64 chwoong/team_00_project:0.1.0
+git clone https://github.com/2026-Spring-PM/Team_13_demo_gui.git
+cd Team_13_demo_gui
 ```
 
-(2) Run the app
+(2) Pull the Team 13 Docker Image
+
+```sh
+docker pull --platform linux/amd64 redfrienz/team_13_project:0.1.0
+```
+
+The Team 13 image is built from `chwoong/team_00_project:0.1.0` with an added graphical browser for the web GUI.
+
+Team members only need to publish the image once:
+
+```sh
+docker login
+bash docker/docker_push.sh
+```
+
+(3) Run the app
 
 Option A - Run automatically:
 
@@ -32,7 +48,7 @@ From inside the container, run:
 ./build/main
 ```
 
-(3) Web browser
+(4) Web browser
 
 ```text
 http://localhost:6080/vnc.html

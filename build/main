@@ -29,16 +29,20 @@ fi
 sleep 1
 
 launch_browser() {
+  if command -v google-chrome >/dev/null 2>&1; then
+    google-chrome --no-sandbox --disable-dev-shm-usage --disable-gpu "$URL"
+    return
+  fi
+  if command -v google-chrome-stable >/dev/null 2>&1; then
+    google-chrome-stable --no-sandbox --disable-dev-shm-usage --disable-gpu "$URL"
+    return
+  fi
   if command -v chromium >/dev/null 2>&1; then
     chromium --no-sandbox --disable-dev-shm-usage "$URL"
     return
   fi
   if command -v chromium-browser >/dev/null 2>&1; then
     chromium-browser --no-sandbox --disable-dev-shm-usage "$URL"
-    return
-  fi
-  if command -v google-chrome >/dev/null 2>&1; then
-    google-chrome --no-sandbox --disable-dev-shm-usage "$URL"
     return
   fi
   if command -v firefox >/dev/null 2>&1; then

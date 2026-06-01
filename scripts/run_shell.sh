@@ -5,7 +5,7 @@ IMAGE_NAME="${IMAGE_NAME:-redfrienz/team_13_project:0.1.0}"
 CONTAINER_NAME="${CONTAINER_NAME:-team13-farm-village-gui-shell}"
 
 if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
-  bash docker/docker_build.sh
+  docker pull --platform linux/amd64 "$IMAGE_NAME"
 fi
 
 docker run --rm -it \

@@ -588,7 +588,7 @@ const EN_EXACT={
   "잠김":"Locked","빈칸":"Empty","성장중":"Growing","클릭: 전투 입장":"Click: Enter Battle","훈련소 건설 필요":"Training Center needed","클릭: 상점 열기":"Click: Open Shop","클릭: 영웅 훈련":"Click: Hero Training",
   "클릭: 훈련소 건설":"Click: Build Training Center","작업 중":"Working",
   "[I] 인벤토리":"[I] Inventory","가축":"Livestock","골드":"Gold","경험치":"EXP","씨앗":"Seeds","작물":"Crops","보유":"Owned","판매":"Sell","구매":"Buy","가득 참":"Full","뒤로":"Back",
-  "씨앗 구매":"Buy Seeds","가축 구매":"Buy Livestock","작물 성장의 시작":"Start crop growth","목장 생산력 확장":"Expand ranch production","수확물을 골드로 전환":"Turn harvests into Gold","심을 씨앗 선택":"Choose Seed","밭에 심을 작물을 고르고 성장 보상을 확인":"Pick a crop for this field and check growth rewards","씨앗 없음":"No seeds","긴 성장":"Long growth","빠른 성장":"Fast growth","선택한 씨앗 심기":"Plant selected seed","선택한 밭":"Selected field","전체 씨앗":"Total seeds",
+  "씨앗 구매":"Buy Seeds","가축 구매":"Buy Livestock","작물 성장의 시작":"Start crop growth","목장 생산력 확장":"Expand ranch production","수확물을 골드로 전환":"Turn harvests into Gold","심을 씨앗 선택":"Choose Seed","밭에 심을 작물을 고르고 성장 보상을 확인":"Pick a crop for this field and check growth rewards","씨앗 없음":"No seeds","긴 성장":"Slow growth","빠른 성장":"Fast growth","선택한 씨앗 심기":"Plant selected seed","선택한 밭":"Selected field","전체 씨앗":"Total seeds",
   "작물을 선택하세요":"Choose a crop","보유한 씨앗 없음":"No seeds owned","왼쪽에서 씨앗을 고르면 정보가 표시됩니다.":"Choose a seed on the left to see details.","상점에서 씨앗을 구매한 뒤 심을 수 있습니다.":"Buy seeds from the shop before planting.",
   "씨앗 x3":"Seeds x3","소 구매":"Buy Cow","양 구매":"Buy Sheep","닭 구매":"Buy Chicken","작물 판매 x5":"Sell Crops x5","우유 판매 x1":"Sell Milk x1","달걀 판매 x3":"Sell Eggs x3","양털 판매 x1":"Sell Wool x1","판매할 가축이 없어요.":"No livestock to sell.",
   "작물 판매":"Sell Crops","가축 및 생산물 판매":"Sell Livestock and Products","6종 작물 판매":"Sell six crop types","가축과 생산물 판매":"Sell livestock and products","씨앗, 가축, 판매 품목을 한 곳에서 관리":"Manage seeds, livestock, and sales in one place","1-5 클리어 필요":"Clear 1-5 first",
@@ -633,6 +633,8 @@ function tr(v){
     .replace(/현재 효과: 작물 훈련 추가 경험치 \+(\d+)%/g,"Current Effect: Crop Training Bonus EXP +$1%")
     .replace(/레벨업 효과: 작물 훈련 추가 경험치 \+(\d+)% -> \+(\d+)%/g,"Level-up Effect: Crop Training Bonus EXP +$1% -> +$2%")
     .replace(/작물 훈련 추가 경험치 \+(\d+)%/g,"Crop Training Bonus EXP +$1%")
+    .replace(/긴 성장 · 경험치 \+(\d+)/g,"Slow growth · EXP +$1")
+    .replace(/빠른 성장 · 경험치 \+(\d+)/g,"Fast growth · EXP +$1")
     .replace(/선택한 밭: (\d+)행 (\d+)열 · 전체 씨앗 (\d+)/g,"Selected Field: row $1, col $2 · Total seeds $3")
     .replace(/^(.+?) (\d+)개 수확!$/g,(m,name,amount)=>`Harvested ${amount} ${enTerm(name)}!`)
     .replace(/^(.+?) 씨앗 3개 구매!$/g,(m,name)=>`Bought 3 ${enTerm(name)} seeds!`)

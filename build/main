@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8000}"
-URL="http://${HOST}:${PORT}/web/farm_village.html"
+URL="http://${HOST}:${PORT}/index.html"
 
 echo ""
 echo "=========================================="

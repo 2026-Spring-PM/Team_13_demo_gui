@@ -22,7 +22,7 @@ bash scripts/run.sh
 The script starts a local web server and prints the game URL:
 
 ```text
-http://127.0.0.1:8000/web/farm_village.html
+http://127.0.0.1:8000/index.html
 ```
 
 Open that URL in your browser.
